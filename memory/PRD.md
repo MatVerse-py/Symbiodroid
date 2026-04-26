@@ -54,8 +54,9 @@ Motor Python (FastAPI) para análise forense de evidências conversacionais (Wha
 
 ## Backlog
 - P1: Diarização de áudio via pyannote.audio (separar vozes em chamadas — exige aceite de licença HF + GPU). Hook preparado em `symbios/hf_client.py`.
+- P1: Plug Symbiodroid (mobile app) nos endpoints `/seal` + `/share`
 - P2: Streaming SSE em `/process` para casos grandes
 - P2: Background processing (Celery/RQ) para casos com muitos áudios
-- P2: Assinatura HMAC nos webhooks (header `X-Symbios-Signature`)
+- P2: Endpoint `GET /api/cases/{id}/shares/{share_id}/log` para auditoria detalhada de acessos
 - P3: Suporte a Telegram exports (JSON)
 - P3: Comparação de versões do dossiê (diff entre processamentos)

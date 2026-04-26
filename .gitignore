@@ -80,3 +80,32 @@ memory/test_credentials.md
 
 # Mobile development
 android-sdk/
+
+# ---- SYMBIOS Evidence OS ----
+# Secrets / config (NEVER commit)
+.env
+.env.local
+.env.*.local
+backend/.env
+frontend/.env
+*.key
+
+# Evidence storage (NEVER commit user evidence)
+backend/cases/
+**/cases/raw/
+**/cases/processed/
+**/cases/reports/
+*sealed_dossier.pdf
+*dossie_pericial.md
+*dossie_pericial.pdf
+
+# Test artifacts
+/tmp/whatsapp_test.txt
+/tmp/contrato.pdf
+/tmp/sealed*.pdf
+/tmp/dossie*.pdf
+test_reports/
+
+# Logs
+*.log
+logs/

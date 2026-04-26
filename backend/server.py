@@ -26,7 +26,7 @@ Endpoints (todos prefixados com /api):
     GET    /api/flags/catalog
 """
 from fastapi import (
-    FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, status, BackgroundTasks,
+    FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, status, BackgroundTasks, Request,
 )
 from fastapi.responses import PlainTextResponse, Response
 from dotenv import load_dotenv
@@ -46,6 +46,7 @@ from models import (  # noqa: E402
     CaseCreate, Case, EvidenceFile, Event, EventReview,
     LedgerEntry, AnalyzeRequest, AnalyzeResponse, ProcessResult,
     PreviewResponse, LedgerSummary, CaseSeal, SealVerifyResponse,
+    ShareCreate, ShareResponse, ShareInfo,
     utc_now_iso, gen_id,
 )
 from auth import (  # noqa: E402
@@ -58,6 +59,10 @@ from symbios.parser import classify_file  # noqa: E402
 from symbios.hf_client import safe_generate, is_configured as hf_configured  # noqa: E402
 from symbios.pdf_render import render_pdf_from_markdown  # noqa: E402
 from symbios.webhooks import deliver_webhook  # noqa: E402
+from symbios.share import (  # noqa: E402
+    gen_share_id, create_share_token, decode_share_token, build_share_url,
+    DEFAULT_TTL_HOURS, MAX_TTL_HOURS,
+)
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("symbios")
@@ -678,6 +683,132 @@ async def verify_seal(case_id: str, current=Depends(get_current_user)):
         sealed_at=seal["sealed_at"],
         issues=issues,
     )
+
+
+# ---------- Share (public temporary links) ----------
+@api.post("/cases/{case_id}/share", response_model=ShareResponse, status_code=201)
+async def create_share(
+    case_id: str,
+    payload: ShareCreate,
+    current=Depends(get_current_user),
+):
+    """Cria um link público temporário para o PDF selado.
+    Apenas casos selados podem ser compartilhados.
+    """
+    case = await _get_case_or_404(case_id, current["id"])
+    if case.get("status") != "sealed":
+        raise HTTPException(
+            status_code=400,
+            detail="Compartilhamento exige caso selado. Chame POST /cases/{id}/seal primeiro.",
+        )
+    p = _seal_pdf_path(case_id)
+    if not p.exists():
+        raise HTTPException(status_code=400, detail="PDF selado ausente no servidor")
+
+    ttl = payload.ttl_hours if payload.ttl_hours else DEFAULT_TTL_HOURS
+
+    share_id = gen_share_id()
+    token, expires_at = create_share_token(share_id, case_id, ttl_hours=ttl)
+    created_at = utc_now_iso()
+
+    share_doc = {
+        "share_id": share_id,
+        "case_id": case_id,
+        "owner_id": current["id"],
+        "resource": "seal.pdf",
+        "token_jti": share_id,
+        "ttl_hours": ttl,
+        "expires_at": expires_at.isoformat(),
+        "created_at": created_at,
+        "created_by": current["id"],
+        "revoked": False,
+        "revoked_at": None,
+        "access_count": 0,
+        "last_accessed_at": None,
+        "access_log": [],
+    }
+    await db.case_shares.insert_one(share_doc)
+    logger.info(f"share criado share_id={share_id} case={case_id} ttl={ttl}h by={current['id']}")
+
+    return ShareResponse(
+        share_id=share_id,
+        case_id=case_id,
+        resource="seal.pdf",
+        token=token,
+        url=build_share_url(token),
+        expires_at=expires_at.isoformat(),
+        ttl_hours=ttl,
+        created_at=created_at,
+    )
+
+
+@api.get("/cases/{case_id}/shares", response_model=List[ShareInfo])
+async def list_shares(case_id: str, current=Depends(get_current_user)):
+    await _get_case_or_404(case_id, current["id"])
+    docs = await db.case_shares.find(
+        {"case_id": case_id, "owner_id": current["id"]},
+        {"_id": 0, "access_log": 0, "token_jti": 0},
+    ).sort("created_at", -1).to_list(500)
+    return [ShareInfo(**d) for d in docs]
+
+
+@api.delete("/cases/{case_id}/share/{share_id}", status_code=204)
+async def revoke_share(
+    case_id: str,
+    share_id: str,
+    current=Depends(get_current_user),
+):
+    await _get_case_or_404(case_id, current["id"])
+    res = await db.case_shares.update_one(
+        {"share_id": share_id, "case_id": case_id, "owner_id": current["id"], "revoked": False},
+        {"$set": {"revoked": True, "revoked_at": utc_now_iso()}},
+    )
+    if res.matched_count == 0:
+        raise HTTPException(status_code=404, detail="Share não encontrado ou já revogado")
+    logger.info(f"share revogado share_id={share_id} case={case_id} by={current['id']}")
+
+
+# Public endpoint (no auth): resolve token and serve the sealed PDF.
+@app.get("/api/share/{token}")
+async def public_share(token: str, request: Request):
+    payload = decode_share_token(token)
+    share_id = payload.get("sub")
+    case_id = payload.get("case_id")
+    if not share_id or not case_id:
+        raise HTTPException(status_code=400, detail="Token sem identificadores")
+
+    share = await db.case_shares.find_one({"share_id": share_id}, {"_id": 0})
+    if not share:
+        raise HTTPException(status_code=404, detail="Share não encontrado")
+    if share.get("revoked"):
+        raise HTTPException(status_code=410, detail="Share revogado")
+    if share.get("case_id") != case_id:
+        raise HTTPException(status_code=400, detail="Token inconsistente")
+
+    p = _seal_pdf_path(case_id)
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="PDF selado não encontrado")
+
+    # Log access (best-effort, non-blocking semantically)
+    client_ip = request.client.host if request.client else "?"
+    user_agent = request.headers.get("user-agent", "?")[:200]
+    await db.case_shares.update_one(
+        {"share_id": share_id},
+        {
+            "$inc": {"access_count": 1},
+            "$set": {"last_accessed_at": utc_now_iso()},
+            "$push": {
+                "access_log": {
+                    "$each": [{"at": utc_now_iso(), "ip": client_ip, "ua": user_agent}],
+                    "$slice": -200,  # keep last 200 entries
+                }
+            },
+        },
+    )
+    logger.info(f"share acessado share_id={share_id} ip={client_ip}")
+
+    headers = {"Content-Disposition": f'inline; filename="dossie_selado_{case_id}.pdf"'}
+    return Response(content=p.read_bytes(), media_type="application/pdf", headers=headers)
 
 
 # ---------- Mount ----------

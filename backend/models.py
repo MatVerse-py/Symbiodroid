@@ -89,6 +89,38 @@ class SealVerifyResponse(BaseModel):
     issues: List[str] = []
 
 
+# ---------- Share (public temporary links) ----------
+class ShareCreate(BaseModel):
+    ttl_hours: Optional[int] = None  # default applied server-side
+
+
+class ShareResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    share_id: str
+    case_id: str
+    resource: str = "seal.pdf"
+    token: str
+    url: str
+    expires_at: str
+    ttl_hours: int
+    created_at: str
+
+
+class ShareInfo(BaseModel):
+    """Owner-facing share metadata (token NOT included)."""
+    model_config = ConfigDict(extra="ignore")
+    share_id: str
+    case_id: str
+    resource: str
+    expires_at: str
+    created_at: str
+    created_by: str
+    revoked: bool = False
+    revoked_at: Optional[str] = None
+    access_count: int = 0
+    last_accessed_at: Optional[str] = None
+
+
 # ---------- Evidence ----------
 class EvidenceFile(BaseModel):
     model_config = ConfigDict(extra="ignore")
