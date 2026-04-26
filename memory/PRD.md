@@ -42,6 +42,17 @@ Motor Python (FastAPI) para análise forense de evidências conversacionais (Wha
 - **Webhook de conclusão** — POST automático para `webhook_url` quando `process` termina (BackgroundTask, fire-and-forget)
 - Revisão humana de eventos (accepted/rejected + nota)
 - **Selo (`/seal`)** — congelamento imutável: gera PDF final, SHA-256 do PDF e do markdown, snapshot dos arquivos com seus hashes, registra `sealed_at` + `sealed_by`. Endpoints `GET /seal`, `GET /seal.pdf`, `GET /seal/verify` (recalcula hash e detecta adulteração). Após selado, `upload`/`process`/`seal`/`delete`/`review` retornam HTTP 409.
+- **Webhooks com HMAC** — todos webhooks de saída carregam `X-Symbios-Signature: sha256=<hex>` (HMAC-SHA256 do body JSON canônico) + `X-Symbios-Timestamp` (UTC). Helper `verify_signature()` em `symbios/webhooks.py`.
+- **Share temporário (`/share`)** — link público assinado para PDF selado:
+  - `POST /api/cases/{id}/share` (auth) → JWT curto (default 72h, max 720h). Só funciona com caso `sealed`.
+  - `GET /api/share/{token}` (público) → serve PDF, incrementa `access_count`, registra IP+UA em `access_log` (últimos 200).
+  - `GET /api/cases/{id}/shares` (auth) → lista shares.
+  - `GET /api/cases/{id}/shares/{share_id}/log` (auth) → auditoria detalhada com `access_log` completo.
+  - `DELETE /api/cases/{id}/share/{share_id}` (auth) → revoga (acesso pós → 410).
+- `.gitignore` reforçado bloqueando `backend/cases/`, `*.env`, `*.key`, dossiês gerados, artefatos de teste.
+- `/app/backend/.env.example` publicável (sem segredos).
+- `/app/PRODUCTION_CHECKLIST.md` com rotação de segredos (`openssl rand -hex 64`), CORS restritivo, backup, verificação HMAC (Python+Node), regras mobile.
+- **Cliente TypeScript** `/app/symbiodroid/services/symbiosApi.ts` — todas funções tipadas (auth, cases, seal, share, audit log, upload), pronto para Expo/RN.
 - OpenAPI/Swagger em `/docs` para colar no Custom GPT Actions
 
 ## Configuration
@@ -54,9 +65,8 @@ Motor Python (FastAPI) para análise forense de evidências conversacionais (Wha
 
 ## Backlog
 - P1: Diarização de áudio via pyannote.audio (separar vozes em chamadas — exige aceite de licença HF + GPU). Hook preparado em `symbios/hf_client.py`.
-- P1: Plug Symbiodroid (mobile app) nos endpoints `/seal` + `/share`
+- P1: Anchor temporal (`/seal/anchor`) — RFC 3161 ou OpenTimestamps para prova externa de existência do PDF
 - P2: Streaming SSE em `/process` para casos grandes
 - P2: Background processing (Celery/RQ) para casos com muitos áudios
-- P2: Endpoint `GET /api/cases/{id}/shares/{share_id}/log` para auditoria detalhada de acessos
 - P3: Suporte a Telegram exports (JSON)
 - P3: Comparação de versões do dossiê (diff entre processamentos)

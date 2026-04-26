@@ -46,7 +46,7 @@ from models import (  # noqa: E402
     CaseCreate, Case, EvidenceFile, Event, EventReview,
     LedgerEntry, AnalyzeRequest, AnalyzeResponse, ProcessResult,
     PreviewResponse, LedgerSummary, CaseSeal, SealVerifyResponse,
-    ShareCreate, ShareResponse, ShareInfo,
+    ShareCreate, ShareResponse, ShareInfo, ShareLogResponse,
     utc_now_iso, gen_id,
 )
 from auth import (  # noqa: E402
@@ -766,6 +766,23 @@ async def revoke_share(
     if res.matched_count == 0:
         raise HTTPException(status_code=404, detail="Share não encontrado ou já revogado")
     logger.info(f"share revogado share_id={share_id} case={case_id} by={current['id']}")
+
+
+@api.get("/cases/{case_id}/shares/{share_id}/log", response_model=ShareLogResponse)
+async def get_share_log(
+    case_id: str,
+    share_id: str,
+    current=Depends(get_current_user),
+):
+    """Auditoria detalhada: lista de acessos, contagem, expiração, status."""
+    await _get_case_or_404(case_id, current["id"])
+    doc = await db.case_shares.find_one(
+        {"share_id": share_id, "case_id": case_id, "owner_id": current["id"]},
+        {"_id": 0, "token_jti": 0},
+    )
+    if not doc:
+        raise HTTPException(status_code=404, detail="Share não encontrado")
+    return ShareLogResponse(**doc)
 
 
 # Public endpoint (no auth): resolve token and serve the sealed PDF.

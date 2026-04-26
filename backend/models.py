@@ -121,6 +121,26 @@ class ShareInfo(BaseModel):
     last_accessed_at: Optional[str] = None
 
 
+class ShareAccessEntry(BaseModel):
+    at: str
+    ip: Optional[str] = None
+    ua: Optional[str] = None
+
+
+class ShareLogResponse(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    share_id: str
+    case_id: str
+    access_count: int
+    revoked: bool
+    revoked_at: Optional[str] = None
+    expires_at: str
+    created_at: str
+    created_by: str
+    last_accessed_at: Optional[str] = None
+    access_log: List[ShareAccessEntry] = Field(default_factory=list)
+
+
 # ---------- Evidence ----------
 class EvidenceFile(BaseModel):
     model_config = ConfigDict(extra="ignore")
