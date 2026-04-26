@@ -43,6 +43,7 @@ class TokenResponse(BaseModel):
 class CaseCreate(BaseModel):
     title: str
     description: Optional[str] = ""
+    webhook_url: Optional[str] = None
 
 
 class Case(BaseModel):
@@ -56,6 +57,7 @@ class Case(BaseModel):
     total_messages: int = 0
     total_flags: int = 0
     omega_status: str = "PENDING"  # PENDING | OK | BLOCKED
+    webhook_url: Optional[str] = None
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
 
@@ -138,3 +140,26 @@ class ProcessResult(BaseModel):
     flags_url: str
     ledger_url: str
     report_url: str
+
+
+# ---------- Preview (executive summary) ----------
+class LedgerSummary(BaseModel):
+    total_in_brl: float = 0.0
+    total_out_brl: float = 0.0
+    total_unknown_brl: float = 0.0
+    total_in_usd: float = 0.0
+    total_out_usd: float = 0.0
+    entries_count: int = 0
+    blocked_count: int = 0
+
+
+class PreviewResponse(BaseModel):
+    case_id: str
+    title: str
+    status: str
+    omega_status: str
+    totals: Dict[str, int]
+    flag_top: Dict[str, int]
+    ledger_summary: LedgerSummary
+    executive_summary: str = ""
+    has_llm_summary: bool = False

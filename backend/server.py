@@ -26,9 +26,9 @@ Endpoints (todos prefixados com /api):
     GET    /api/flags/catalog
 """
 from fastapi import (
-    FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, status,
+    FastAPI, APIRouter, Depends, HTTPException, UploadFile, File, status, BackgroundTasks,
 )
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from dotenv import load_dotenv
 from starlette.middleware.cors import CORSMiddleware
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -45,6 +45,7 @@ from models import (  # noqa: E402
     UserCreate, UserLogin, UserPublic, TokenResponse,
     CaseCreate, Case, EvidenceFile, Event, EventReview,
     LedgerEntry, AnalyzeRequest, AnalyzeResponse, ProcessResult,
+    PreviewResponse, LedgerSummary,
     utc_now_iso, gen_id,
 )
 from auth import (  # noqa: E402
@@ -55,6 +56,8 @@ from symbios.flags import flag_metadata  # noqa: E402
 from symbios.hash_utils import sha256_file  # noqa: E402
 from symbios.parser import classify_file  # noqa: E402
 from symbios.hf_client import safe_generate, is_configured as hf_configured  # noqa: E402
+from symbios.pdf_render import render_pdf_from_markdown  # noqa: E402
+from symbios.webhooks import deliver_webhook  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
 logger = logging.getLogger("symbios")
@@ -165,6 +168,7 @@ async def create_case(payload: CaseCreate, current=Depends(get_current_user)):
         owner_id=current["id"],
         title=payload.title,
         description=payload.description or "",
+        webhook_url=payload.webhook_url,
     )
     # create dirs
     case_raw_dir(case.case_id).mkdir(parents=True, exist_ok=True)
@@ -236,7 +240,11 @@ async def upload_evidence(
 
 
 @api.post("/cases/{case_id}/process", response_model=ProcessResult)
-async def process_case(case_id: str, current=Depends(get_current_user)):
+async def process_case(
+    case_id: str,
+    background_tasks: BackgroundTasks,
+    current=Depends(get_current_user),
+):
     case = await _get_case_or_404(case_id, current["id"])
     raw = case_raw_dir(case_id)
     if not raw.exists() or not any(raw.iterdir()):
@@ -294,7 +302,7 @@ async def process_case(case_id: str, current=Depends(get_current_user)):
         }},
     )
 
-    return ProcessResult(
+    process_result = ProcessResult(
         case_id=case_id,
         status="processed",
         total_files=len(result["files"]),
@@ -306,6 +314,31 @@ async def process_case(case_id: str, current=Depends(get_current_user)):
         ledger_url=f"/api/cases/{case_id}/ledger",
         report_url=f"/api/cases/{case_id}/report",
     )
+
+    # Fire webhook (non-blocking)
+    webhook_url = case.get("webhook_url")
+    if webhook_url:
+        background_tasks.add_task(
+            deliver_webhook,
+            webhook_url,
+            {
+                "event": "case.processed",
+                "case_id": case_id,
+                "status": "processed",
+                "omega_status": result["omega_status"],
+                "totals": {
+                    "files": len(result["files"]),
+                    "events": len(result["events"]),
+                    "flags": result["total_flags"],
+                    "ledger": len(result["ledger"]),
+                },
+                "report_url": f"/api/cases/{case_id}/report",
+                "report_pdf_url": f"/api/cases/{case_id}/report.pdf",
+                "preview_url": f"/api/cases/{case_id}/preview",
+            },
+        )
+
+    return process_result
 
 
 @api.get("/cases/{case_id}/files", response_model=List[EvidenceFile])
@@ -354,6 +387,104 @@ async def get_report(case_id: str, current=Depends(get_current_user)):
             detail="Dossiê ainda não gerado. Chame POST /api/cases/{case_id}/process primeiro.",
         )
     return PlainTextResponse(report_path.read_text(encoding="utf-8"), media_type="text/markdown")
+
+
+@api.get("/cases/{case_id}/report.pdf")
+async def get_report_pdf(case_id: str, current=Depends(get_current_user)):
+    await _get_case_or_404(case_id, current["id"])
+    report_path = case_reports_dir(case_id) / "dossie_pericial.md"
+    if not report_path.exists():
+        raise HTTPException(
+            status_code=404,
+            detail="Dossiê ainda não gerado. Chame POST /api/cases/{case_id}/process primeiro.",
+        )
+    md = report_path.read_text(encoding="utf-8")
+    pdf_bytes = render_pdf_from_markdown(md)
+    if pdf_bytes is None:
+        raise HTTPException(status_code=500, detail="Falha ao gerar PDF (verifique WeasyPrint).")
+    headers = {"Content-Disposition": f'inline; filename="dossie_{case_id}.pdf"'}
+    return Response(content=pdf_bytes, media_type="application/pdf", headers=headers)
+
+
+@api.get("/cases/{case_id}/preview", response_model=PreviewResponse)
+async def get_preview(case_id: str, current=Depends(get_current_user)):
+    """Resumo executivo: Ω-Gate + flags + totais do ledger + breve análise LLM (sem timeline)."""
+    case = await _get_case_or_404(case_id, current["id"])
+
+    # Counts
+    total_files = await db.evidence_files.count_documents({"case_id": case_id})
+    total_events = await db.events.count_documents({"case_id": case_id})
+
+    # Flags top
+    flag_counts: dict = {}
+    async for ev in db.events.find(
+        {"case_id": case_id, "flags": {"$ne": []}}, {"_id": 0, "flags": 1}
+    ):
+        for f in ev.get("flags", []):
+            flag_counts[f] = flag_counts.get(f, 0) + 1
+    flag_top = dict(sorted(flag_counts.items(), key=lambda kv: -kv[1])[:8])
+
+    # Ledger summary
+    ledger_docs = await db.ledger.find({"case_id": case_id}, {"_id": 0}).to_list(2000)
+    summary = LedgerSummary(entries_count=len(ledger_docs))
+    for L in ledger_docs:
+        amount = float(L.get("amount") or 0)
+        currency = L.get("currency", "BRL")
+        direction = L.get("direction", "unknown")
+        if L.get("omega_status") == "BLOCKED":
+            summary.blocked_count += 1
+        if currency == "USD":
+            if direction == "in":
+                summary.total_in_usd += amount
+            elif direction == "out":
+                summary.total_out_usd += amount
+        else:
+            if direction == "in":
+                summary.total_in_brl += amount
+            elif direction == "out":
+                summary.total_out_brl += amount
+            else:
+                summary.total_unknown_brl += amount
+
+    # Executive summary via LLM (best-effort)
+    exec_summary = ""
+    has_llm = False
+    if hf_configured() and total_events > 0:
+        sample = await db.events.find({"case_id": case_id}, {"_id": 0}).to_list(20)
+        bullets = "\n".join(
+            f"- [{e.get('timestamp') or 's/data'}] {e.get('author') or '?'}: "
+            f"{(e.get('message') or '')[:160]}"
+            for e in sample
+        )
+        prompt = (
+            "Em 4 a 6 linhas, em português, produza um veredito executivo do caso "
+            "para um bot de mensagem (WhatsApp/Telegram). Inclua: principal risco, "
+            "valores envolvidos se houver, e recomendação imediata. Sem floreios.\n\n"
+            f"Eventos:\n{bullets}\n\n"
+            f"Flags top: {flag_top}\n"
+            f"Ω-Gate: {case.get('omega_status')}"
+        )
+        result = safe_generate(prompt, max_tokens=220, temperature=0.3)
+        if result:
+            exec_summary = result
+            has_llm = True
+
+    return PreviewResponse(
+        case_id=case_id,
+        title=case.get("title", ""),
+        status=case.get("status", "unknown"),
+        omega_status=case.get("omega_status", "PENDING"),
+        totals={
+            "files": total_files,
+            "events": total_events,
+            "flags": int(case.get("total_flags") or 0),
+            "ledger": len(ledger_docs),
+        },
+        flag_top=flag_top,
+        ledger_summary=summary,
+        executive_summary=exec_summary,
+        has_llm_summary=has_llm,
+    )
 
 
 @api.post("/cases/{case_id}/analyze", response_model=AnalyzeResponse)

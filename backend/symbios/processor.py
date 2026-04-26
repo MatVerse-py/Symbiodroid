@@ -10,6 +10,7 @@ from collections import Counter
 from .hash_utils import sha256_file
 from .parser import parse_whatsapp_txt, extract_zip, classify_file
 from .ocr import ocr_image
+from .pdf_utils import extract_pdf_text
 from .hf_client import safe_transcribe, safe_generate, is_configured
 from .flags import detect_flags
 from .omega_gate import check_event, check_case
@@ -128,6 +129,51 @@ def _process_file(
                 events.append(ev)
         else:
             logger.info(f"STT pulado (HF_TOKEN ausente) — {file_path.name}")
+
+    elif file_type == "pdf":
+        text = extract_pdf_text(file_path)
+        if text:
+            # Try WhatsApp-format first; if no events, store as a single bulk event.
+            parsed = parse_whatsapp_txt(text)
+            if parsed:
+                for p in parsed:
+                    ev = {
+                        "event_id": gen_id("EVT"),
+                        "case_id": case_id,
+                        "timestamp": p.get("timestamp"),
+                        "raw_timestamp": p.get("raw_timestamp"),
+                        "author": p.get("author"),
+                        "message": p.get("message", ""),
+                        "source": "pdf",
+                        "source_file_id": rec["file_id"],
+                        "source_sha256": sha,
+                        "flags": detect_flags(p.get("message", "")),
+                        "review_status": "unreviewed",
+                        "metadata": {"pdf": True},
+                    }
+                    status, missing = check_event(ev)
+                    ev["omega_status"] = status
+                    ev["metadata"]["missing_fields"] = missing
+                    events.append(ev)
+            else:
+                ev = {
+                    "event_id": gen_id("EVT"),
+                    "case_id": case_id,
+                    "timestamp": None,
+                    "raw_timestamp": None,
+                    "author": None,
+                    "message": text[:4000],
+                    "source": "pdf",
+                    "source_file_id": rec["file_id"],
+                    "source_sha256": sha,
+                    "flags": detect_flags(text),
+                    "review_status": "unreviewed",
+                    "metadata": {"pdf": True, "truncated": len(text) > 4000},
+                }
+                status, missing = check_event(ev)
+                ev["omega_status"] = status
+                ev["metadata"]["missing_fields"] = missing
+                events.append(ev)
 
     return file_records, events
 
