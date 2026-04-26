@@ -17,6 +17,8 @@ import { useAgent } from '@/hooks/useAgent';
 import { getSystemMetrics } from '@/services/agentService';
 import { QuickActions } from '@/constants/config';
 import { useVault } from '@/hooks/useVault';
+import { useForense } from '@/hooks/useForense';
+import { getForenseSummary } from '@/services/forenseService';
 
 const { width } = Dimensions.get('window');
 
@@ -34,6 +36,8 @@ export default function DashboardScreen() {
   const router = useRouter();
   const { runs, isRunning, currentStep, currentStepIndex, totalSteps, ledger } = useAgent();
   const { entries } = useVault();
+  const { cases, flagMap } = useForense();
+  const forenseSummary = getForenseSummary(cases);
   const metrics = getSystemMetrics();
   const [currentTime, setCurrentTime] = useState(new Date());
 
@@ -218,6 +222,34 @@ export default function DashboardScreen() {
           </View>
         </GlassCard>
 
+        {/* Forense Quick Access */}
+        <Text style={styles.sectionTitle}>EVIDENCE OS</Text>
+        <Pressable
+          style={({ pressed }) => [styles.forenseCard, pressed && { opacity: 0.85 }]}
+          onPress={() => router.push('/(tabs)/forense')}
+        >
+          <View style={styles.forenseLeft}>
+            <View style={styles.forenseIcon}>
+              <Ionicons name="search" size={22} color={Colors.red} />
+            </View>
+            <View>
+              <Text style={styles.forenseTitle}>SYMBIOS Forense</Text>
+              <Text style={styles.forenseSubtitle}>Análise pericial · Ω-Gate · Dossiê</Text>
+            </View>
+          </View>
+          <View style={styles.forenseStats}>
+            <View style={styles.fStat}>
+              <Text style={[styles.fStatNum, { color: Colors.red }]}>{forenseSummary.total}</Text>
+              <Text style={styles.fStatLabel}>casos</Text>
+            </View>
+            <View style={styles.fStat}>
+              <Text style={[styles.fStatNum, { color: Colors.gold }]}>{forenseSummary.totalFlags}</Text>
+              <Text style={styles.fStatLabel}>flags</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={16} color={Colors.textTertiary} />
+          </View>
+        </Pressable>
+
         {/* System Info */}
         <GlassCard accent="green" style={styles.systemCard}>
           <View style={styles.systemRow}>
@@ -359,4 +391,31 @@ const styles = StyleSheet.create({
   systemRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   systemLabel: { fontSize: 10, color: Colors.textTertiary, letterSpacing: 1, flex: 1 },
   systemValue: { fontSize: 13, fontWeight: '600', color: Colors.textPrimary, fontFamily: 'monospace' },
+
+  forenseCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: Colors.surface1,
+    borderRadius: Radius.md,
+    borderWidth: 1,
+    borderColor: 'rgba(255,68,68,0.3)',
+    padding: Spacing.md,
+    gap: 12,
+  },
+  forenseLeft: { flexDirection: 'row', alignItems: 'center', gap: 12, flex: 1 },
+  forenseIcon: {
+    width: 44,
+    height: 44,
+    borderRadius: Radius.sm,
+    backgroundColor: 'rgba(255,68,68,0.1)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  forenseTitle: { fontSize: 14, fontWeight: '700', color: Colors.textPrimary },
+  forenseSubtitle: { fontSize: 11, color: Colors.textTertiary, marginTop: 2 },
+  forenseStats: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  fStat: { alignItems: 'center' },
+  fStatNum: { fontSize: 18, fontWeight: '700' },
+  fStatLabel: { fontSize: 9, color: Colors.textTertiary, letterSpacing: 0.5 },
 });

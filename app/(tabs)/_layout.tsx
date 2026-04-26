@@ -71,6 +71,14 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="forense"
+        options={{
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="search" color={color} focused={focused} label="Forense" />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="settings"
         options={{
           tabBarIcon: ({ color, focused }) => (
