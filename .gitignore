@@ -25,15 +25,55 @@ expo-env.d.ts
 npm-debug.*
 yarn-debug.*
 yarn-error.*
+npm-debug.log*
+pnpm-debug.log*
 
 # macOS
 .DS_Store
 *.pem
 
-# local env files
-.env*.local
+# local env files / secrets
+.env
+.env.*
+!.env.example
+*.secret
+*.secrets
+*.token
+*.key
+*.pem
 
 # typescript
 *.tsbuildinfo
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.venv/
+venv/
+
+# SYMBIOS runtime artifacts and evidence
+backend/cases/
+backend/uploads/
+backend/reports/
+backend/storage/
+backend/tmp/
+backend/*.sqlite
+backend/*.db
+cases/
+uploads/
+reports/
+storage/
+tmp/
+
+# Generated forensic artifacts and test evidence
+dossie_pericial.md
+dossie_pericial.pdf
+*.seal.json
+contrato.pdf
+whatsapp_test.txt
+*whatsapp*.txt
+*.evidence.zip
 
 app-example
