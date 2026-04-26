@@ -41,6 +41,7 @@ Motor Python (FastAPI) para análise forense de evidências conversacionais (Wha
 - **Endpoint `/preview`** — resumo executivo (Ω + flag_top + ledger_summary + LLM 4-6 linhas) ideal para bot WhatsApp/Telegram
 - **Webhook de conclusão** — POST automático para `webhook_url` quando `process` termina (BackgroundTask, fire-and-forget)
 - Revisão humana de eventos (accepted/rejected + nota)
+- **Selo (`/seal`)** — congelamento imutável: gera PDF final, SHA-256 do PDF e do markdown, snapshot dos arquivos com seus hashes, registra `sealed_at` + `sealed_by`. Endpoints `GET /seal`, `GET /seal.pdf`, `GET /seal/verify` (recalcula hash e detecta adulteração). Após selado, `upload`/`process`/`seal`/`delete`/`review` retornam HTTP 409.
 - OpenAPI/Swagger em `/docs` para colar no Custom GPT Actions
 
 ## Configuration

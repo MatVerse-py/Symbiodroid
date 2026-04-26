@@ -45,7 +45,7 @@ from models import (  # noqa: E402
     UserCreate, UserLogin, UserPublic, TokenResponse,
     CaseCreate, Case, EvidenceFile, Event, EventReview,
     LedgerEntry, AnalyzeRequest, AnalyzeResponse, ProcessResult,
-    PreviewResponse, LedgerSummary,
+    PreviewResponse, LedgerSummary, CaseSeal, SealVerifyResponse,
     utc_now_iso, gen_id,
 )
 from auth import (  # noqa: E402
@@ -53,7 +53,7 @@ from auth import (  # noqa: E402
 )
 from symbios.processor import process_case_files, build_dossier_markdown  # noqa: E402
 from symbios.flags import flag_metadata  # noqa: E402
-from symbios.hash_utils import sha256_file  # noqa: E402
+from symbios.hash_utils import sha256_file, sha256_bytes  # noqa: E402
 from symbios.parser import classify_file  # noqa: E402
 from symbios.hf_client import safe_generate, is_configured as hf_configured  # noqa: E402
 from symbios.pdf_render import render_pdf_from_markdown  # noqa: E402
@@ -95,6 +95,14 @@ async def _get_case_or_404(case_id: str, user_id: str) -> dict:
     if not doc:
         raise HTTPException(status_code=404, detail="Caso não encontrado")
     return doc
+
+
+def _ensure_not_sealed(case: dict) -> None:
+    if case.get("status") == "sealed":
+        raise HTTPException(
+            status_code=409,
+            detail="Caso selado: imutável. Crie um novo caso para novas evidências.",
+        )
 
 
 # ---------- Health ----------
@@ -192,7 +200,8 @@ async def get_case(case_id: str, current=Depends(get_current_user)):
 
 @api.delete("/cases/{case_id}", status_code=204)
 async def delete_case(case_id: str, current=Depends(get_current_user)):
-    await _get_case_or_404(case_id, current["id"])
+    case = await _get_case_or_404(case_id, current["id"])
+    _ensure_not_sealed(case)
     await db.cases.delete_one({"case_id": case_id, "owner_id": current["id"]})
     await db.evidence_files.delete_many({"case_id": case_id})
     await db.events.delete_many({"case_id": case_id})
@@ -208,7 +217,8 @@ async def upload_evidence(
     file: UploadFile = File(...),
     current=Depends(get_current_user),
 ):
-    await _get_case_or_404(case_id, current["id"])
+    case = await _get_case_or_404(case_id, current["id"])
+    _ensure_not_sealed(case)
     raw = case_raw_dir(case_id)
     raw.mkdir(parents=True, exist_ok=True)
 
@@ -246,6 +256,7 @@ async def process_case(
     current=Depends(get_current_user),
 ):
     case = await _get_case_or_404(case_id, current["id"])
+    _ensure_not_sealed(case)
     raw = case_raw_dir(case_id)
     if not raw.exists() or not any(raw.iterdir()):
         raise HTTPException(status_code=400, detail="Nenhum arquivo enviado para este caso")
@@ -538,6 +549,7 @@ async def review_event(
     )
     if not case:
         raise HTTPException(status_code=404, detail="Evento não encontrado")
+    _ensure_not_sealed(case)
     update = {"review_status": payload.review_status}
     if payload.note:
         ev_meta = ev.get("metadata") or {}
@@ -546,6 +558,126 @@ async def review_event(
     await db.events.update_one({"event_id": event_id}, {"$set": update})
     ev.update(update)
     return Event(**ev)
+
+
+# ---------- Seal (cadeia de custódia oficial) ----------
+def _seal_pdf_path(case_id: str) -> Path:
+    return case_reports_dir(case_id) / "sealed_dossier.pdf"
+
+
+@api.post("/cases/{case_id}/seal", response_model=CaseSeal, status_code=201)
+async def seal_case(case_id: str, current=Depends(get_current_user)):
+    """Congela o caso. Gera PDF final, hash SHA-256 e snapshot dos arquivos.
+    Após selado, o caso fica imutável (uploads, process, review e delete bloqueados).
+    """
+    case = await _get_case_or_404(case_id, current["id"])
+    if case.get("status") == "sealed":
+        raise HTTPException(status_code=409, detail="Caso já está selado")
+    if case.get("status") != "processed":
+        raise HTTPException(
+            status_code=400,
+            detail="Caso precisa ter sido processado antes de selar (POST /cases/{id}/process)",
+        )
+
+    md_path = case_reports_dir(case_id) / "dossie_pericial.md"
+    if not md_path.exists():
+        raise HTTPException(status_code=400, detail="Dossiê markdown não encontrado")
+
+    md_text = md_path.read_text(encoding="utf-8")
+    md_hash = sha256_bytes(md_text.encode("utf-8"))
+
+    pdf_bytes = render_pdf_from_markdown(md_text)
+    if pdf_bytes is None:
+        raise HTTPException(status_code=500, detail="Falha ao gerar PDF para selar")
+
+    seal_hash = sha256_bytes(pdf_bytes)
+    sealed_pdf_path = _seal_pdf_path(case_id)
+    sealed_pdf_path.write_bytes(pdf_bytes)
+
+    # Snapshot files
+    files_snapshot = []
+    async for f in db.evidence_files.find({"case_id": case_id}, {"_id": 0}):
+        files_snapshot.append({
+            "filename": f.get("filename"),
+            "sha256": f.get("sha256"),
+            "size_bytes": f.get("size_bytes"),
+            "file_type": f.get("file_type"),
+        })
+
+    sealed_at = utc_now_iso()
+    seal_doc = {
+        "case_id": case_id,
+        "sealed_at": sealed_at,
+        "sealed_by": current["id"],
+        "seal_hash": seal_hash,
+        "md_hash": md_hash,
+        "files_snapshot": files_snapshot,
+        "total_files": int(case.get("total_files") or 0),
+        "total_messages": int(case.get("total_messages") or 0),
+        "total_flags": int(case.get("total_flags") or 0),
+        "omega_status": case.get("omega_status", "PENDING"),
+        "pdf_size_bytes": len(pdf_bytes),
+    }
+    await db.case_seals.insert_one(seal_doc)
+
+    await db.cases.update_one(
+        {"case_id": case_id},
+        {"$set": {
+            "status": "sealed",
+            "sealed_at": sealed_at,
+            "seal_hash": seal_hash,
+            "updated_at": sealed_at,
+        }},
+    )
+
+    return CaseSeal(**seal_doc)
+
+
+@api.get("/cases/{case_id}/seal", response_model=CaseSeal)
+async def get_seal(case_id: str, current=Depends(get_current_user)):
+    await _get_case_or_404(case_id, current["id"])
+    seal = await db.case_seals.find_one({"case_id": case_id}, {"_id": 0})
+    if not seal:
+        raise HTTPException(status_code=404, detail="Caso não selado")
+    return CaseSeal(**seal)
+
+
+@api.get("/cases/{case_id}/seal.pdf")
+async def get_sealed_pdf(case_id: str, current=Depends(get_current_user)):
+    await _get_case_or_404(case_id, current["id"])
+    p = _seal_pdf_path(case_id)
+    if not p.exists():
+        raise HTTPException(status_code=404, detail="PDF selado não encontrado")
+    headers = {"Content-Disposition": f'inline; filename="dossie_selado_{case_id}.pdf"'}
+    return Response(content=p.read_bytes(), media_type="application/pdf", headers=headers)
+
+
+@api.get("/cases/{case_id}/seal/verify", response_model=SealVerifyResponse)
+async def verify_seal(case_id: str, current=Depends(get_current_user)):
+    """Recalcula SHA-256 do PDF selado e compara com o hash registrado."""
+    await _get_case_or_404(case_id, current["id"])
+    seal = await db.case_seals.find_one({"case_id": case_id}, {"_id": 0})
+    if not seal:
+        raise HTTPException(status_code=404, detail="Caso não selado")
+    p = _seal_pdf_path(case_id)
+    issues: List[str] = []
+    if not p.exists():
+        issues.append("arquivo_pdf_selado_ausente")
+        current_hash = ""
+    else:
+        current_hash = sha256_file(p)
+    expected = seal["seal_hash"]
+    valid = current_hash == expected and not issues
+    if current_hash and current_hash != expected:
+        issues.append("hash_divergente")
+    return SealVerifyResponse(
+        case_id=case_id,
+        valid=valid,
+        seal_hash_expected=expected,
+        seal_hash_current=current_hash,
+        sealed_at=seal["sealed_at"],
+        issues=issues,
+    )
 
 
 # ---------- Mount ----------

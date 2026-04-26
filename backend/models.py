@@ -58,8 +58,35 @@ class Case(BaseModel):
     total_flags: int = 0
     omega_status: str = "PENDING"  # PENDING | OK | BLOCKED
     webhook_url: Optional[str] = None
+    sealed_at: Optional[str] = None
+    seal_hash: Optional[str] = None
     created_at: str = Field(default_factory=utc_now_iso)
     updated_at: str = Field(default_factory=utc_now_iso)
+
+
+# ---------- Seal ----------
+class CaseSeal(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    case_id: str
+    sealed_at: str
+    sealed_by: str  # user_id
+    seal_hash: str  # SHA-256 of sealed PDF
+    md_hash: str    # SHA-256 of dossier markdown
+    files_snapshot: List[Dict[str, Any]]  # [{filename, sha256, size_bytes}]
+    total_files: int
+    total_messages: int
+    total_flags: int
+    omega_status: str
+    pdf_size_bytes: int
+
+
+class SealVerifyResponse(BaseModel):
+    case_id: str
+    valid: bool
+    seal_hash_expected: str
+    seal_hash_current: str
+    sealed_at: str
+    issues: List[str] = []
 
 
 # ---------- Evidence ----------
