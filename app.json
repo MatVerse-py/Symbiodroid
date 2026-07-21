@@ -1,17 +1,19 @@
 {
   "expo": {
-    "name": "onspace-app",
-    "slug": "onspace-app",
-    "version": "1.0.0",
+    "name": "Symbiodroid",
+    "slug": "symbiodroid",
+    "version": "0.1.0",
     "orientation": "portrait",
     "icon": "./assets/images/logo.png",
-    "scheme": "onspaceapp",
+    "scheme": "matverse",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
       "supportsTablet": true
     },
     "android": {
+      "package": "io.matverse.symbiodroid",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/images/logo.png",
         "backgroundColor": "#ffffff"

@@ -122,7 +122,7 @@ export default function ForenseScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.title}>FORENSE</Text>
-          <Text style={styles.subtitle}>SYMBIOS Evidence OS · Ω-Gate Ativo</Text>
+          <Text style={[styles.subtitle, { color: Colors.warning }]}>SIMULAÇÃO · SEM VALIDADE PERICIAL</Text>
         </View>
         <Pressable
           style={({ pressed }) => [styles.newCaseBtn, pressed && { opacity: 0.8 }]}
@@ -295,7 +295,7 @@ export default function ForenseScreen() {
             {[
               { icon: 'folder-open', step: '01', text: 'Crie um caso com título e descrição' },
               { icon: 'cloud-upload', step: '02', text: 'Anexe evidências: WhatsApp, prints, áudios, extratos' },
-              { icon: 'flash', step: '03', text: 'Processe: SHA-256, OCR, STT, parser, flags' },
+              { icon: 'flash', step: '03', text: 'Demo: fingerprint não criptográfico e eventos simulados' },
               { icon: 'shield', step: '04', text: 'Ω-Gate avalia inconsistências e bloqueia se necessário' },
               { icon: 'document-text', step: '05', text: 'Dossiê pericial soberano gerado com cadeia de custódia' },
             ].map(item => (

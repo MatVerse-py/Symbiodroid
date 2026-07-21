@@ -1,10 +1,33 @@
-````md
 # Symbiodroid
 
 > The sovereign mobile organism.  
 > A personal operating layer where identity, memory, data, consent and AI remain under the user's control.
 
-![QR Access](./assets/qr.png)
+![Symbiodroid](./assets/images/logo.png)
+
+---
+
+## Current implementation status
+
+Symbiodroid is an early Expo prototype. Agent, memory, vault and forensic screens still contain
+demonstration data and must not be represented as production security or forensic evidence.
+
+The first operational milestone is **R1 — Broken Screen Continuity**:
+
+- a Chrome/ChromeOS Rescue Host using direct WebUSB + AOA 2.0 HID;
+- a proof-backed recovery state machine;
+- sanitized diagnostics that never log PIN input;
+- non-destructive ADB acquisition scripts with real SHA-256 manifests;
+- an explicit hardware acceptance gate.
+
+Start with:
+
+- [Rescue protocol](./docs/RESCUE_PROTOCOL.md)
+- [Galaxy A13 recovery](./docs/RECOVERY_A13.md)
+- [Security model](./docs/SECURITY.md)
+- [R1 acceptance](./docs/R1_ACCEPTANCE.md)
+
+Hardware status: **UNVERIFIED until the physical acceptance gate passes**.
 
 ---
 
@@ -27,7 +50,7 @@ Instead of treating the phone as a launcher for third-party platforms, Symbiodro
 ```text
 Web2 phone = gateway to platforms
 Symbiodroid = platform owned by the user
-````
+```
 
 ---
 
@@ -331,8 +354,4 @@ It is pro-human.
 ```text
 The future should augment people,
 not absorb them.
-```
-
-```
-::contentReference[oaicite:0]{index=0}
 ```
