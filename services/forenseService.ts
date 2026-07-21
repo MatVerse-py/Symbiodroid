@@ -61,14 +61,14 @@ function genId(prefix: string): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 }
 
-function sha256Mock(input: string): string {
-  // Mock hash for demo purposes
+function demoFingerprint(input: string): string {
+  // Deliberately non-cryptographic. Never represent this value as SHA-256 evidence.
   let hash = 0;
   for (let i = 0; i < input.length; i++) {
     hash = ((hash << 5) - hash) + input.charCodeAt(i);
     hash |= 0;
   }
-  return Math.abs(hash).toString(16).padStart(8, '0') + '...a3f9e2b1';
+  return `DEMO-NOT-SHA256-${Math.abs(hash).toString(16).padStart(8, '0')}`;
 }
 
 // ─── CASES ──────────────────────────────────────────────────────────────────
@@ -86,7 +86,7 @@ export function createCase(title: string, description: string): ForenseCase {
     totalMessages: 0,
     totalFlags: 0,
     omegaStatus: 'PENDING',
-    sovereignSeal: sha256Mock(id + title),
+    sovereignSeal: demoFingerprint(id + title),
   };
 }
 
@@ -109,7 +109,7 @@ export function createEvidence(caseId: string, filename: string): Evidence {
     caseId,
     filename,
     type: detectEvidenceType(filename),
-    sha256: sha256Mock(caseId + filename + Date.now()),
+    sha256: demoFingerprint(caseId + filename + Date.now()),
     sizeLabel: `${(Math.random() * 9 + 0.5).toFixed(1)} MB`,
     uploadedAt: Date.now(),
     status: 'uploaded',
@@ -193,13 +193,13 @@ export async function processCase(
   onProgress?: (step: string, index: number) => void,
 ): Promise<ProcessResult> {
   const steps = [
-    'Verificando integridade SHA-256...',
+    'Simulando fingerprint não criptográfico...',
     'Extraindo mensagens e metadados...',
     'Processando OCR em prints...',
     'Analisando timeline cronológica...',
     'Executando detector de flags SYMBSEC...',
     'Avaliando Ω-Gate...',
-    'Gerando dossiê soberano...',
+    'Gerando relatório demonstrativo...',
   ];
 
   for (let i = 0; i < steps.length; i++) {
@@ -245,7 +245,7 @@ export async function processCase(
       content,
       flags: eventFlags,
       omegaStatus: omegaSt,
-      sourceHash: sha256Mock(content + ts),
+      sourceHash: demoFingerprint(content + ts),
       reviewStatus: 'pending',
       evidenceId: evidences[0]?.id || '',
     });
@@ -300,7 +300,7 @@ export function generateDossie(
   const criticalFlags = flags.filter(f => f.severity === 'critical');
   const highFlags = flags.filter(f => f.severity === 'high');
 
-  return `DOSSIÊ PERICIAL SYMBIOS
+  return `RELATÓRIO DEMONSTRATIVO SYMBIOS — SEM VALIDADE PERICIAL
 ══════════════════════════════════════════
 CASO: ${forenseCase.id}
 TÍTULO: ${forenseCase.title}
@@ -337,8 +337,8 @@ ${flags.map(f => `[${f.code}] ${f.label} — ${f.severity.toUpperCase()}
 
 CADEIA DE CUSTÓDIA
 ──────────────────
-Todas as evidências foram processadas com geração de hash SHA-256.
-A integridade dos dados é garantida pelo SYMBIOS Sovereign Seal.
+SIMULAÇÃO: nenhum arquivo real foi processado e nenhum hash SHA-256 foi calculado.
+Os fingerprints exibidos não comprovam integridade nem cadeia de custódia.
 
 CONCLUSÃO Ω-GATE
 ─────────────────
@@ -347,7 +347,7 @@ ${omegaStatus === 'BLOCK' ? 'BLOQUEADO: Não emitir conclusão sem resolução d
 ${omegaStatus === 'REVIEW' ? 'Requer revisão humana antes da emissão final.' : ''}
 
 ──────────────────────────────────────────
-GERADO POR SYMBIOS EVIDENCE OS v1.0
+GERADO PELO PROTÓTIPO SYMBIOS EVIDENCE OS — DEMO
 Powered by Omega Engine · MatVerse Platform
 Own yourself. Now and later.`;
 }

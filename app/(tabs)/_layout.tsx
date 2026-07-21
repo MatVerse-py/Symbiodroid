@@ -55,6 +55,14 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="rescue"
+        options={{
+          tabBarIcon: ({ color, focused }) => (
+            <TabIcon name="medkit" color={color} focused={focused} label="Rescue" />
+          ),
+        }}
+      />
+      <Tabs.Screen
         name="skills"
         options={{
           tabBarIcon: ({ color, focused }) => (

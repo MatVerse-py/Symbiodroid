@@ -380,7 +380,7 @@ export default function SettingsScreen() {
         <GlassCard accent="green" style={styles.manifestoCard}>
           <Text style={styles.manifestoTitle}>SYMBIOS MANIFESTO</Text>
           <Text style={styles.manifestoText}>
-            "Assim como PQC protege segredos do futuro,{'\n'}Symbios protege a soberania humana{'\n'}do futuro algorítmico."
+            “Assim como PQC protege segredos do futuro,{'\n'}Symbios protege a soberania humana{'\n'}do futuro algorítmico.”
           </Text>
           <Text style={styles.manifestoTagline}>Own yourself. Now and later.</Text>
         </GlassCard>
