@@ -8,7 +8,16 @@ if ! command -v adb >/dev/null 2>&1; then
 fi
 
 output="$(adb devices -l 2>&1)"
-printf '%s\n' "$output"
+# Preserve raw output only in memory for state detection. Never print device serials.
+printf '%s\n' "$output" | awk '
+  NR == 1 { print; next }
+  NF > 1 {
+    $1 = "[serial-redacted]"
+    print
+    next
+  }
+  { print }
+'
 
 device_lines="$(printf '%s\n' "$output" | awk 'NR > 1 && NF > 1 { print }')"
 if [[ -z "$device_lines" ]]; then
