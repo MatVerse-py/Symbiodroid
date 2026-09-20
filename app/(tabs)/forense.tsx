@@ -297,7 +297,7 @@ export default function ForenseScreen() {
               { icon: 'cloud-upload', step: '02', text: 'Anexe evidências: WhatsApp, prints, áudios, extratos' },
               { icon: 'flash', step: '03', text: 'Demo: fingerprint não criptográfico e eventos simulados' },
               { icon: 'shield', step: '04', text: 'Ω-Gate avalia inconsistências e bloqueia se necessário' },
-              { icon: 'document-text', step: '05', text: 'Dossiê pericial soberano gerado com cadeia de custódia' },
+              { icon: 'document-text', step: '05', text: 'Relatório demonstrativo gerado sem validade pericial ou cadeia de custódia real' },
             ].map(item => (
               <View key={item.step} style={styles.howRow}>
                 <View style={styles.howStepBadge}>
