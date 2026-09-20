@@ -116,8 +116,13 @@ export default function RescueScreen() {
 
   const copyDiagnostic = async () => {
     const diagnostic = createSafeDiagnostic(snapshotRef.current, capabilities, error);
-    await Clipboard.setStringAsync(diagnostic);
-    setCopied(true);
+    try {
+      await Clipboard.setStringAsync(diagnostic);
+      setCopied(true);
+    } catch (clipboardError) {
+      setCopied(false);
+      setError(describeAoaError(clipboardError));
+    }
   };
 
   const panResponder = useMemo(
