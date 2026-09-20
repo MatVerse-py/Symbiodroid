@@ -342,7 +342,7 @@ Os fingerprints exibidos não comprovam integridade nem cadeia de custódia.
 
 CONCLUSÃO Ω-GATE
 ─────────────────
-${omegaStatus === 'PASS' ? 'Dossiê aprovado para uso. Todas as evidências verificadas.' : ''}
+${omegaStatus === 'PASS' ? 'Resultado demonstrativo PASS no fluxo simulado; não constitui evidência verificada nem laudo pericial.' : ''}
 ${omegaStatus === 'BLOCK' ? 'BLOQUEADO: Não emitir conclusão sem resolução das flags críticas.' : ''}
 ${omegaStatus === 'REVIEW' ? 'Requer revisão humana antes da emissão final.' : ''}
 
