@@ -66,7 +66,9 @@ export function createAcquisitionManifest(input: CreateManifestInput): Acquisiti
     throw new Error('INVALID_MANIFEST:timeOrder');
   }
 
-  const files = [...input.files].sort((a, b) => a.relativePath.localeCompare(b.relativePath));
+  const files = [...input.files].sort((a, b) =>
+    a.relativePath < b.relativePath ? -1 : a.relativePath > b.relativePath ? 1 : 0,
+  );
   files.forEach(validateFile);
   const duplicate = files.find((file, index) => file.relativePath === files[index - 1]?.relativePath);
   if (duplicate) throw new Error('INVALID_MANIFEST:duplicatePath');
