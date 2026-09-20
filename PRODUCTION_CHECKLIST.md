@@ -43,3 +43,12 @@ HF_TOKEN=<optional-server-only>
 ## Regra mobile
 
 O Symbiodroid deve consumir a API via `services/symbiosApi.ts` e nunca carregar segredos de servidor no bundle.
+
+## Regra Rescue R1
+
+- Executar `pnpm test` e validar todas as transições da máquina de estados.
+- Confirmar que PIN, teclas, ADB private keys e OTPs não aparecem no diagnóstico.
+- Não publicar `ADB_AUTHORIZED` sem saída `adb devices -l` igual a `device`.
+- Não publicar `ACQUISITION_VERIFIED` sem `MANIFEST.json`, `MANIFEST.sha256` e hashes dos arquivos.
+- Manter o módulo forense simulado marcado como **SEM VALIDADE PERICIAL**.
+- Completar `docs/R1_ACCEPTANCE.md` antes de declarar compatibilidade física com um firmware Android.

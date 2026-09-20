@@ -3,7 +3,9 @@ const ENV_URL =
     ? process.env.EXPO_PUBLIC_SYMBIOS_API_URL
     : "";
 
-let BASE_URL = (ENV_URL || "https://api.symbios.ai").replace(/\/+$/, "");
+// Fail closed: a sovereign client must never send credentials or evidence to an
+// implicit remote endpoint. The operator must configure the API explicitly.
+let BASE_URL = ENV_URL.replace(/\/+$/, "");
 
 export function setSymbiosBaseUrl(url: string) {
   BASE_URL = url.replace(/\/+$/, "");
@@ -36,6 +38,9 @@ async function request<T>(
     expect?: "json" | "text" | "blob" | "void";
   } = {}
 ): Promise<T> {
+  if (!BASE_URL) {
+    throw new Error("SYMBIOS_API_URL_REQUIRED");
+  }
   const headers: Record<string, string> = {};
   if (options.token) headers.Authorization = `Bearer ${options.token}`;
 
@@ -165,7 +170,10 @@ export const symbiosApi = {
         expect: "void",
       }),
     publicFetch: (shareToken: string) => request<Blob>(`/api/share/${shareToken}`, { expect: "blob" }),
-    publicUrl: (shareToken: string) => `${BASE_URL}/api/share/${shareToken}`,
+    publicUrl: (shareToken: string) => {
+      if (!BASE_URL) throw new Error("SYMBIOS_API_URL_REQUIRED");
+      return `${BASE_URL}/api/share/${shareToken}`;
+    },
   },
 };
 

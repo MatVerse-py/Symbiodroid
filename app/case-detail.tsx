@@ -121,6 +121,13 @@ export default function CaseDetailScreen() {
         </View>
       </View>
 
+      <View style={styles.omegaAlert}>
+        <Ionicons name="flask" size={16} color={Colors.orange} />
+        <Text style={styles.omegaAlertText}>
+          DADOS FORENSES SIMULADOS — esta tela é demonstrativa e não possui validade forense, pericial ou probatória.
+        </Text>
+      </View>
+
       {/* Processing Banner */}
       {isProcessing ? (
         <View style={styles.processingBanner}>
@@ -202,7 +209,7 @@ export default function CaseDetailScreen() {
             <GlassCard style={styles.sealCard}>
               <Text style={styles.sectionLabel}>SOVEREIGN SEAL</Text>
               <Text style={styles.sealHash}>{forenseCase.sovereignSeal}</Text>
-              <Text style={styles.sealNote}>Hash de integridade soberana · SYMBIOS v1.0</Text>
+              <Text style={styles.sealNote}>Fingerprint demonstrativo · não é SHA-256</Text>
             </GlassCard>
 
             {forenseCase.description ? (
@@ -402,7 +409,7 @@ export default function CaseDetailScreen() {
                 </View>
                 <View style={styles.hashRow}>
                   <Ionicons name="shield-checkmark" size={12} color={Colors.textTertiary} />
-                  <Text style={styles.hashText} numberOfLines={1}>SHA-256: {ev.sha256}</Text>
+                  <Text style={styles.hashText} numberOfLines={1}>DEMO: {ev.sha256}</Text>
                 </View>
               </GlassCard>
             ))}

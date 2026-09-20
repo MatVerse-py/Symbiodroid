@@ -1,7 +1,7 @@
 export const AppConfig = {
   name: 'SYMBIODROID',
-  version: '1.0.0',
-  buildNumber: '001',
+  version: '0.1.0',
+  buildNumber: 'R1',
   agentName: 'OMEGA',
   maxMemoryEntries: 100,
   omegaGateBannedTerms: [
