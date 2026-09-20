@@ -75,3 +75,44 @@ describe('Acquisition manifest', () => {
     ).toThrow('INVALID_MANIFEST:duplicatePath');
   });
 });
+
+
+describe('Acquisition manifest timestamp contract', () => {
+  const base = {
+    device: { serial: 'R58MEXAMPLE', model: 'SM-A135M', androidVersion: '14' },
+    requestedPaths: ['/sdcard/DCIM'],
+    copiedPaths: ['/sdcard/DCIM'],
+    failedPaths: [],
+    files: [{ relativePath: 'DCIM/a.jpg', bytes: 1, sha256: HASH_A }],
+  };
+
+  it('rejects parseable non-ISO timestamps', () => {
+    expect(() =>
+      createAcquisitionManifest({
+        ...base,
+        startedAt: 'Sep 20 2026',
+        completedAt: '2026-09-20T12:01:00.000Z',
+      }),
+    ).toThrow('INVALID_MANIFEST:startedAt');
+  });
+
+  it('rejects normalized invalid calendar dates', () => {
+    expect(() =>
+      createAcquisitionManifest({
+        ...base,
+        startedAt: '2026-02-30T12:00:00.000Z',
+        completedAt: '2026-03-02T12:01:00.000Z',
+      }),
+    ).toThrow('INVALID_MANIFEST:startedAt');
+  });
+
+  it('accepts canonical UTC timestamps with or without milliseconds', () => {
+    expect(
+      createAcquisitionManifest({
+        ...base,
+        startedAt: '2026-09-20T12:00:00Z',
+        completedAt: '2026-09-20T12:01:00.000Z',
+      }).startedAt,
+    ).toBe('2026-09-20T12:00:00Z');
+  });
+});
