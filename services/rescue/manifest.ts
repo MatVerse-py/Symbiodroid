@@ -36,8 +36,15 @@ export type CreateManifestInput = Omit<
   files: AcquiredFile[];
 };
 
+const ISO_8601_UTC = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z$/;
+
 function assertIso8601(value: string, field: string): void {
-  if (!value || Number.isNaN(Date.parse(value))) throw new Error(`INVALID_MANIFEST:${field}`);
+  if (!ISO_8601_UTC.test(value)) throw new Error(`INVALID_MANIFEST:${field}`);
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) throw new Error(`INVALID_MANIFEST:${field}`);
+  const canonical = parsed.toISOString();
+  const expected = value.includes('.') ? value : value.replace('Z', '.000Z');
+  if (canonical !== expected) throw new Error(`INVALID_MANIFEST:${field}`);
 }
 
 function validateFile(file: AcquiredFile): void {
