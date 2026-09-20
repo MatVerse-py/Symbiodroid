@@ -4,6 +4,7 @@ import {
   applyRescueProof,
   createRescueSnapshot,
   createSafeDiagnostic,
+  resetRescueSnapshot,
 } from '../stateMachine';
 import type { RescueProof } from '../types';
 
@@ -198,5 +199,45 @@ describe('Rescue state machine', () => {
         clock,
       ),
     ).toThrow('INVALID_PROOF:fileCount');
+  });
+});
+
+
+describe('Rescue session closure', () => {
+  it('preserves the proof/event lineage and appends an explicit disconnect event', () => {
+    let snapshot = createRescueSnapshot(clock);
+    snapshot = applyRescueProof(snapshot, usbProof(), clock);
+    const closed = resetRescueSnapshot(snapshot, clock);
+
+    expect(closed.sessionId).toBe(snapshot.sessionId);
+    expect(closed.state).toBe('DISCONNECTED');
+    expect(closed.proofs).toEqual(snapshot.proofs);
+    expect(closed.events).toHaveLength(snapshot.events.length + 1);
+    expect(closed.events.at(-1)).toMatchObject({
+      from: 'USB_DETECTED',
+      to: 'DISCONNECTED',
+      proofKind: 'session_closed',
+    });
+  });
+
+  it('accepts an explicit hardware failure after AOA support is proven', () => {
+    let snapshot = createRescueSnapshot(clock);
+    snapshot = applyRescueProof(snapshot, usbProof(), clock);
+    snapshot = applyRescueProof(
+      snapshot,
+      proof({ kind: 'aoa_protocol', source: 'webusb', protocol: 2 }),
+      clock,
+    );
+    snapshot = applyRescueProof(
+      snapshot,
+      proof({
+        kind: 'hardware_failure',
+        source: 'webusb',
+        reasonCode: 'USB_RESTRICTED_WHILE_LOCKED',
+        detail: 'HID registration refused',
+      }),
+      clock,
+    );
+    expect(snapshot.state).toBe('FAILED_REQUIRES_HARDWARE_REPAIR');
   });
 });
