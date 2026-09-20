@@ -121,6 +121,13 @@ export default function CaseDetailScreen() {
         </View>
       </View>
 
+      <View style={styles.omegaAlert}>
+        <Ionicons name="flask" size={16} color={Colors.orange} />
+        <Text style={styles.omegaAlertText}>
+          DADOS FORENSES SIMULADOS — esta tela é demonstrativa e não possui validade forense, pericial ou probatória.
+        </Text>
+      </View>
+
       {/* Processing Banner */}
       {isProcessing ? (
         <View style={styles.processingBanner}>
