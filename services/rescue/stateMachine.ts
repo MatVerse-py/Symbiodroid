@@ -14,7 +14,7 @@ const ALLOWED_TRANSITIONS: Record<RescueState, readonly RescueState[]> = {
   DISCONNECTED: ['USB_DETECTED'],
   USB_DETECTED: ['AOA_PROBED', 'ADB_UNAUTHORIZED', 'ADB_AUTHORIZED', 'DISCONNECTED'],
   AOA_PROBED: ['AOA_SUPPORTED', 'AOA_UNAVAILABLE', 'DISCONNECTED'],
-  AOA_SUPPORTED: ['HID_READY', 'DISCONNECTED'],
+  AOA_SUPPORTED: ['HID_READY', 'FAILED_REQUIRES_HARDWARE_REPAIR', 'DISCONNECTED'],
   AOA_UNAVAILABLE: ['FAILED_REQUIRES_HARDWARE_REPAIR', 'DISCONNECTED'],
   HID_READY: ['ADB_UNAUTHORIZED', 'ADB_AUTHORIZED', 'FAILED_REQUIRES_HARDWARE_REPAIR', 'DISCONNECTED'],
   ADB_UNAUTHORIZED: ['HID_READY', 'ADB_AUTHORIZED', 'FAILED_REQUIRES_HARDWARE_REPAIR', 'DISCONNECTED'],
@@ -160,7 +160,9 @@ export function resetRescueSnapshot(
     proofKind: 'session_closed',
   };
   return {
-    ...createRescueSnapshot(() => at),
+    ...snapshot,
+    state: 'DISCONNECTED',
+    updatedAt: at,
     events: [...snapshot.events, event],
   };
 }
