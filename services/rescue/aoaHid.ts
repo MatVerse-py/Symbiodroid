@@ -1,6 +1,7 @@
 import type {
   AoaProtocolProof,
   HidRegistrationProof,
+  HardwareFailureProof,
   RescueCapabilities,
   RescueProof,
   UsbDetectedProof,
@@ -224,6 +225,7 @@ export class AoaHidSession {
     });
 
     const registeredHids = new Set<number>();
+    let protocolSupported = false;
     try {
       const protocol = await getProtocol(device);
       const protocolProof: AoaProtocolProof = {
@@ -238,6 +240,7 @@ export class AoaHidSession {
         proof: protocolProof,
       });
       if (protocol < 2) throw new Error(`AOA_VERSION_${protocol}`);
+      protocolSupported = true;
 
       await registerHid(device, KEYBOARD_ID, KEYBOARD_DESCRIPTOR);
       registeredHids.add(KEYBOARD_ID);
@@ -261,6 +264,21 @@ export class AoaHidSession {
       });
       return new AoaHidSession(device, protocol);
     } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (protocolSupported && /AOA_CONTROL_(54|56)_/.test(message)) {
+        const failureProof: HardwareFailureProof = {
+          kind: 'hardware_failure',
+          source: 'webusb',
+          recordedAt: now(),
+          reasonCode: 'USB_RESTRICTED_WHILE_LOCKED',
+          detail: 'AOA 2.0 respondeu, mas o registro HID foi recusado pelo dispositivo.',
+        };
+        onProgress?.({
+          stage: 'protocol',
+          detail: failureProof.detail,
+          proof: failureProof,
+        });
+      }
       for (const id of registeredHids) {
         try {
           await controlOut(device, AOA_UNREGISTER_HID, id, 0);
