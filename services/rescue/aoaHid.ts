@@ -223,7 +223,7 @@ export class AoaHidSession {
       proof: usbProof,
     });
 
-    let keyboardRegistered = false;
+    const registeredHids = new Set<number>();
     try {
       const protocol = await getProtocol(device);
       const protocolProof: AoaProtocolProof = {
@@ -240,10 +240,11 @@ export class AoaHidSession {
       if (protocol < 2) throw new Error(`AOA_VERSION_${protocol}`);
 
       await registerHid(device, KEYBOARD_ID, KEYBOARD_DESCRIPTOR);
-      keyboardRegistered = true;
+      registeredHids.add(KEYBOARD_ID);
       onProgress?.({ stage: 'keyboard', detail: 'Teclado HID registrado' });
 
       await registerHid(device, MOUSE_ID, MOUSE_DESCRIPTOR);
+      registeredHids.add(MOUSE_ID);
       onProgress?.({ stage: 'mouse', detail: 'Mouse HID registrado' });
 
       const hidProof: HidRegistrationProof = {
@@ -260,11 +261,11 @@ export class AoaHidSession {
       });
       return new AoaHidSession(device, protocol);
     } catch (error) {
-      if (keyboardRegistered) {
+      for (const id of registeredHids) {
         try {
-          await controlOut(device, AOA_UNREGISTER_HID, KEYBOARD_ID, 0);
+          await controlOut(device, AOA_UNREGISTER_HID, id, 0);
         } catch {
-          // Preserve the original connection error.
+          // Preserve the original connection error while cleaning every registered HID.
         }
       }
       try {
@@ -360,12 +361,22 @@ export class AoaHidSession {
   async close(): Promise<void> {
     if (this.#closed) return;
     this.#closed = true;
+
+    // Drain already-accepted HID operations before unregistering devices.
     try {
-      await controlOut(this.device, AOA_UNREGISTER_HID, KEYBOARD_ID, 0);
-      await controlOut(this.device, AOA_UNREGISTER_HID, MOUSE_ID, 0);
+      await this.#queue;
     } catch {
-      // The device can re-enumerate when USB debugging is enabled.
+      // Individual queued operations already report their own failures.
     }
+
+    for (const id of [KEYBOARD_ID, MOUSE_ID]) {
+      try {
+        await controlOut(this.device, AOA_UNREGISTER_HID, id, 0);
+      } catch {
+        // Attempt cleanup independently for every HID even after a prior failure.
+      }
+    }
+
     try {
       await this.device.close();
     } catch {
