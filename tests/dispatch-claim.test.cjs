@@ -46,6 +46,31 @@ async function main(){
  await check('schema contains dispatch_started_ms',async()=>{assert.equal(db.prepare("SELECT COUNT(*) AS n FROM pragma_table_info('delegation_actions') WHERE name='dispatch_started_ms'").get().n,1)});
  await check('verified outcome reconciles UNKNOWN',async()=>{assert.equal(await journal.inspect('x'),'UNKNOWN');await journal.reconcile('x',finger(action('x','L')),'EXECUTED');assert.equal(await journal.inspect('x'),'EXECUTED')});
  await check('reconciled result cannot dispatch again',async()=>{assert.equal((await claim(action('x','L'))).reason,'OUTCOME_ALREADY_KNOWN')});
+ await check('v0.3 migration conservatively holds legacy UNKNOWN',async()=>{
+   const oldFile=path.join(dir,'old.sqlite'),oldDb=new DatabaseSync(oldFile);
+   try {
+     oldDb.exec(`CREATE TABLE delegation_leases (
+       lease_id TEXT PRIMARY KEY, principal_id TEXT NOT NULL, agent_id TEXT NOT NULL,
+       capability TEXT NOT NULL, scope TEXT NOT NULL, expires_ms INTEGER NOT NULL,
+       issued_ms INTEGER NOT NULL, max_uses INTEGER NOT NULL, uses INTEGER NOT NULL DEFAULT 0,
+       revoked_ms INTEGER);
+       CREATE TABLE delegation_actions (
+       action_id TEXT PRIMARY KEY, lease_id TEXT NOT NULL REFERENCES delegation_leases(lease_id),
+       principal_id TEXT NOT NULL,agent_id TEXT NOT NULL,fingerprint TEXT NOT NULL,
+       status TEXT NOT NULL DEFAULT 'UNKNOWN' CHECK(status IN ('UNKNOWN','EXECUTED','FAILED')),
+       reserved_ms INTEGER NOT NULL,completed_ms INTEGER);`);
+     oldDb.prepare('INSERT INTO delegation_leases VALUES (?,?,?,?,?,?,?,?,?,?)')
+       .run('legacy','owner','agent','local.note.append','notes',4000,1000,10,1,null);
+     const a=action('old-unknown','legacy');
+     oldDb.prepare("INSERT INTO delegation_actions VALUES (?,?,?,?,?,'UNKNOWN',?,NULL)")
+       .run(a.actionId,'legacy','owner','agent',finger(a),1000);
+     const migrated=new DurableDelegationJournal(sqlPort(oldDb),()=>now);
+     await migrated.initialize();
+     assert.equal(await migrated.inspect('old-unknown'),'UNKNOWN');
+     assert.equal((await migrated.claimForDispatch('old-unknown','owner','agent',finger(a))).reason,'DISPATCH_ALREADY_CLAIMED');
+     assert.equal(oldDb.prepare('SELECT dispatch_started_ms FROM delegation_actions WHERE action_id=?').get(a.actionId).dispatch_started_ms,1000);
+   }finally{oldDb.close()}
+ });
  console.log(passes+'/'+passes+' PASS');
  }finally{db?.close();secondDb?.close();fs.rmSync(dir,{recursive:true,force:true})}
 }
