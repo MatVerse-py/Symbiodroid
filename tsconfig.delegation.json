@@ -1,0 +1,13 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "Node",
+    "strict": true,
+    "lib": ["ES2022", "DOM"],
+    "skipLibCheck": true,
+    "outDir": "./.delegation-build",
+    "rootDir": "."
+  },
+  "include": ["src/delegation/**/*.ts", "tests/delegation.test.ts", "examples/delegation-demo.ts"]
+}

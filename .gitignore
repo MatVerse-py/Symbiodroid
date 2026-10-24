@@ -77,3 +77,6 @@ whatsapp_test.txt
 *.evidence.zip
 
 app-example
+
+# Symbiodroid offline delegation build
+.delegation-build/
