@@ -1,0 +1,90 @@
+name: Android emulator installation and route smoke
+on:
+  pull_request:
+    paths:
+      - 'scripts/android-emulator-smoke.sh'
+      - '.github/workflows/android-emulator-smoke.yml'
+      - 'docs/ANDROID_EMULATOR_SMOKE_V0_9.md'
+permissions:
+  contents: read
+  actions: read
+jobs:
+  emulator-smoke:
+    # No fork-authored code, push privileges or production credentials.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'test/android-emulator-smoke-v0-9'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+    steps:
+      - name: Checkout isolated emulator test branch
+        uses: actions/checkout@v4
+        with:
+          ref: test/android-emulator-smoke-v0-9
+          persist-credentials: false
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Set up pnpm 9
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+      - name: Install frozen Expo dependencies
+        run: |
+          node scripts/audit-pnpm-lock.cjs
+          pnpm install --frozen-lockfile --ignore-scripts --config.node-linker=hoisted
+      - name: Download independently verified APK from PR 11
+        uses: actions/download-artifact@v4
+        with:
+          name: symbiodroid-debug-apk-v0-8
+          run-id: 40067689095
+          repository: MatVerse-py/Symbiodroid
+          github-token: ${{ github.token }}
+          path: .ci-apk
+      - name: Verify APK SHA-256, app ID and inspect permissions
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="$(find .ci-apk -type f -name app-debug.apk -print -quit)"
+          test -n "$apk"
+          test -s "$apk"
+          echo "1cf02c5af94ef58507ca680210b4a28e6b423216a4125940a0cd6aaf5984b1d8  $apk" | sha256sum -c -
+          actual="$(sha256sum "$apk" | cut -d ' ' -f 1)"
+          echo "Verified APK SHA-256: $actual"
+          aapt="$(find "$ANDROID_HOME/build-tools" -maxdepth 2 -type f -name aapt | sort -V | tail -n 1)"
+          test -x "$aapt"
+          "$aapt" dump badging "$apk" | tee .ci-apk/badging.txt
+          grep -q "package: name='com.matverse.symbiodroid.dev'" .ci-apk/badging.txt
+          "$aapt" dump permissions "$apk" | tee .ci-apk/permissions.txt
+          echo "ANDROID_TEST_APK=$PWD/$apk" >> "$GITHUB_ENV"
+          echo "ANDROID_SMOKE_OUTPUT=$PWD/.android-smoke" >> "$GITHUB_ENV"
+      - name: Install, launch and verify diagnostic on isolated Android emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_5
+          ram-size: 4096M
+          disk-size: 8192M
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          script: bash scripts/android-emulator-smoke.sh
+      - name: Upload synthetic emulator diagnostic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: symbiodroid-android-emulator-smoke-v0-9
+          path: |
+            .ci-apk/badging.txt
+            .ci-apk/permissions.txt
+            .android-smoke/window.xml
+            .android-smoke/deep-link.log
+            .android-smoke/launch.log
+            .android-smoke/emulator-screen.png
+            .android-smoke/metro.log
+          if-no-files-found: ignore
+          retention-days: 1
