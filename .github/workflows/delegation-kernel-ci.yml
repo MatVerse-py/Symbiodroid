@@ -31,7 +31,7 @@ jobs:
         run: node tests/durable-sqlite.test.cjs
       - name: Run identity, policy and evidence boundary tests
         run: node tests/guarded-journal.test.cjs
-      - name: Run 17 dispatch-claim race and revocation tests
+      - name: Run 18 dispatch-claim and legacy-migration tests
         run: node tests/dispatch-claim.test.cjs
       - name: Run isolated local demonstration
         run: node .delegation-build/examples/delegation-demo.js
