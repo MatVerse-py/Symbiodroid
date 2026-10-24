@@ -1,21 +1,35 @@
-# Symbiodroid Delegation Kernel v0.1 — experimental
+# Symbiodroid Delegation Kernel — experimental v0.2 hardening
 
-## Purpose
-Implement revocable and scoped local agent delegation inside Symbiodroid. This is NOT a standalone project and does not replace the existing Organismo, Omega-Gate, Bridge, Cassandra, SymbiOS/MAG or URANO components.
+## Purpose and architectural placement
 
-## Security boundary
-- `AuthorityPort` is deny-by-default. Human approval is not inferred from natural language.
-- A lease has principal, agent, capability, scope, expiry and use budget (maximum 24 hours / 100 uses).
-- Allowlisted demo operations are `local.note.append`, `local.note.read`, `local.math.sum`.
-- A revoked, expired, exhausted or mismatched lease is denied before execution.
-- Duplicate action IDs coalesce within one kernel instance; reuse with different serialized payload is rejected.
-- Failed executor attempts consume reserved uses.
-- Audit records exclude raw action payloads. Audit events and action receipts are NOT cryptographic proof.
-- Sandbox is volatile and never accesses payments, calls, external services, disk or networking.
-- Revocation does not cancel a previously dispatched in-flight action.
+This patch hardens the existing v0.1 in `src/delegation` rather than creating a second runtime.
+Symbiodroid is the owner's presentation/device surface; the independent Ω-Gate/Trust Kernel remains the authoritative policy plane; SymbiOS executes approved work; Bridge handles external boundaries; Cassandra/MNB concern contextual continuity; URANO is the **experimental lab**, not a production executor.
 
-## Local commands
-Requires TypeScript compiler (`tsc`) and Node, but no new project dependencies.
+**Status: contract-level local tests PASS; Android / real identity / durable execution HOLD.**
+
+## Changed API (intentional breaking hardening)
+
+```ts
+const kernel = new DelegationKernel(executor, authorityPort, identityBoundary);
+await kernel.issueLease(request, authenticatedOwnerProof, humanApproval);
+await kernel.execute(action, authenticatedAgentProof);
+await kernel.revokeLease(leaseId, authenticatedOwnerProof, humanApproval);
+```
+
+Production constructors default to `DenyAllAuthority` + `DenyAllIdentity`. The demo injects **hardcoded simulation-only** adapters which are NOT acceptable for real accounts or devices.
+
+- Authenticated owner must match the requested `principalId` before any lease is issued.
+- Authenticated agent AND principal must match the lease, even for an idempotent cached action result.
+- Every grant requires an independently implemented `AuthorityPort` consent decision.
+- All received lease and action inputs are snapshotted before crossing async boundaries.
+- Action payloads are JSON-subset canonicalized, immutable, bounded in size/depth and reject prototype pollution keys, symbols, getters, sparse arrays, cycles and non-finite numbers.
+- Duplicate action IDs use same-request single-flight within the process, and refuse conflicting payloads.
+- Lease lifetime <= 24h, max uses <= 100; resource allocations capped and fail closed.
+- Expired, revoked, exhausted, mismatched or unapproved requests cannot execute.
+- An action completed after a mid-flight revocation is explicitly recorded as `COMPLETED_AFTER_REVOCATION`. **This does not reverse the action.**
+- Audit event entries exclude raw payloads. Audit data is in-memory and not cryptographically signed.
+
+## Commands
 
 ```bash
 tsc -p tsconfig.delegation.json
@@ -23,20 +37,26 @@ node .delegation-build/tests/delegation.test.js
 node .delegation-build/examples/delegation-demo.js
 ```
 
-## Integration contracts
-1. **Symbiodroid:** owner-facing consent and active lease display.
-2. **Organismo / Omega-Gate:** independently verified policy decision and authority; replace the demo approval port.
-3. **SymbiOS/MAG:** implementation-specific executor port.
-4. **Bridge:** external adapters behind canonical ActionRequest contracts, idempotency and reconciliation.
-5. **Cassandra:** contextual continuity; must never autonomously elevate capability privileges.
-6. **URANO:** adversarial, reliability, cost and thermodynamic experiments.
+## Threat model / explicit unclosed P0 issues
 
-## Release blocks
-- Bind agent identity to authenticated device/session transport; caller-supplied agentId is insufficient.
-- Replace demo approval string with real human verification, device attestation and signed capability lease.
-- Persist idempotency keys, usage, revocations and executions atomically across restarts and devices.
-- Add race-safe revocation and cancellation/compensation policy for long-running external actions.
-- Integrate the canonical Omega-Gate and Bridge contracts without policy bypass.
-- Run repository CI, Expo and physical Android validation; local TypeScript tests are not Android tests.
+1. IdentityBoundary has no real Android passkey/biometric, device/session trust anchor or transport binding. Adapters are privileged trusted code and must not be instantiated or selected by untrusted prompts.
+2. Consent UI has not been integrated; simulated strings are **not authentication or consent**.
+3. Lease, idempotency records, audit and revocations are process-local; crashes/restarts reset the state. Multi-device synchronization and exactly-once external operations are **not supported**.
+4. The executor may finish in flight after revocation; cancellation/compensation and eventual external outcome reconciliation are not implemented.
+5. External side-effectful connectors remain out of scope. A remote adapter must not be enabled without transactional reserve/commit/reconciliation semantics.
+6. Audit capacity limits prevent unlimited memory growth in this reference, but production requires durable, atomic reservations; concurrent in-flight events reaching saturation must be handled before side effects.
+7. Repo-level Expo/Android integration, threat testing on actual devices, WCAG/UX consent flows and measured latency/energy remain unverified.
+8. This patch is stacked on v0.1; no change to the PR #1 `R1 broken-screen continuity` branch.
 
-Status: **LOCAL PROTOTYPE PASS; PRODUCTION / REAL-WORLD EXECUTION HOLD**.
+## Production acceptance criteria (all binary)
+
+- Authenticated owner binding: fake owner and fake agent requests BLOCK; real identity/device sessions tested on device.
+- Independent policy binding: exact canonical Omega/HDB interface inspected, no alternate policy implementation.
+- Durable revocation and idempotency: power-cycle, process-crash, simultaneous-device and retry tests PASS with atomic storage.
+- Mid-flight revocation: state explicitly acknowledges the irreversible window, with cancellation/reconciliation where supported.
+- Complete end-to-end approved action on authorized owned device: world-real test supervised, without financial or sensitive external side effects.
+- CI passes, mobile typecheck passes, real Android execution PASS, production deployment gated separately.
+
+## Design discipline
+
+No new independent MatVerse core, no agent self-promotion, no marketing claims of scientific validation and no early merge to `main`.
