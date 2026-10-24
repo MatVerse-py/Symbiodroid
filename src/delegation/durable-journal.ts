@@ -56,7 +56,11 @@ export class DurableDelegationJournal {
     await this.db.transaction(async tx => {
       const col = await tx.get<{ n: number }>(
         "SELECT COUNT(*) AS n FROM pragma_table_info('delegation_actions') WHERE name='dispatch_started_ms'");
-      if (!col?.n) await tx.run('ALTER TABLE delegation_actions ADD COLUMN dispatch_started_ms INTEGER');
+      if (!col?.n) {
+        await tx.run('ALTER TABLE delegation_actions ADD COLUMN dispatch_started_ms INTEGER');
+        // Legacy UNKNOWN may already have reached an executor. Never permit redispatch.
+        await tx.run('UPDATE delegation_actions SET dispatch_started_ms=reserved_ms WHERE dispatch_started_ms IS NULL');
+      }
     });
   }
   /** Grant only AFTER authenticating the owner and verifying consent in a trusted component. */
