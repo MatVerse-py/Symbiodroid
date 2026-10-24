@@ -3,12 +3,15 @@ on:
   pull_request:
     paths:
       - 'src/delegation/**'
+      - 'app/delegation-audit.tsx'
+      - 'app/(tabs)/settings.tsx'
       - 'tests/delegation.test.ts'
       - 'tests/*.test.cjs'
       - 'examples/delegation-demo.ts'
       - 'tsconfig.delegation.json'
       - 'docs/DELEGATION_P0_RECOVERY_V0_3.md'
       - 'docs/DELEGATION_DISPATCH_CLAIM_V0_4.md'
+      - 'docs/DELEGATION_NATIVE_READINESS_V0_5.md'
       - 'docs/DELEGATION_KERNEL_V0_1.md'
       - '.github/workflows/delegation-kernel-ci.yml'
   workflow_dispatch:
@@ -33,5 +36,11 @@ jobs:
         run: node tests/guarded-journal.test.cjs
       - name: Run 18 dispatch-claim and legacy-migration tests
         run: node tests/dispatch-claim.test.cjs
+      - name: Verify read-only readiness and privacy projection
+        run: node tests/readiness.test.cjs
+      - name: Parse native Expo screen without bundling dependencies
+        run: npx --yes --package esbuild@0.25.12 esbuild app/delegation-audit.tsx --outfile=/tmp/matverse-delegation-audit.js --format=esm
+      - name: Parse Expo settings deep link
+        run: npx --yes --package esbuild@0.25.12 esbuild 'app/(tabs)/settings.tsx' --outfile=/tmp/matverse-settings.js --format=esm
       - name: Run isolated local demonstration
         run: node .delegation-build/examples/delegation-demo.js

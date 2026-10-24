@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { useRouter } from 'expo-router';
 import {
   View,
   Text,
@@ -61,6 +62,7 @@ function SettingRow({ icon, label, description, value, toggle, toggleValue, onTo
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
+  const router = useRouter();
   const { ledger, runs } = useAgent();
   const { showAlert } = useAlert();
   const [omegaGateEnabled, setOmegaGateEnabled] = useState(true);
@@ -103,7 +105,7 @@ export default function SettingsScreen() {
               <Text style={styles.profileRole}>ADMIN · NÍVEL SOBERANO</Text>
               <View style={styles.profileBadge}>
                 <View style={styles.profileDot} />
-                <Text style={styles.profileOnline}>Identidade Protegida</Text>
+                <Text style={styles.profileOnline}>Identidade criptográfica: não verificada</Text>
               </View>
             </View>
           </View>
@@ -123,9 +125,21 @@ export default function SettingsScreen() {
         <Text style={styles.sectionTitle}>GOVERNANÇA</Text>
         <GlassCard style={styles.section}>
           <SettingRow
+            icon="analytics-outline"
+            label="Diagnóstico de delegação"
+            description="SQLite · SHA-256 · presença local · pendências Ω/identidade"
+            onPress={() => router.push('/delegation-audit')}
+            color={Colors.cyan}
+          />
+        </GlassCard>
+        <Text style={[styles.settingDesc, { marginBottom: 10, color: Colors.orange }]}>
+          Os controles abaixo representam preferências da interface e não comprovam autorização pelo Ω-Gate canônico.
+        </Text>
+        <GlassCard style={styles.section}>
+          <SettingRow
             icon="shield-checkmark"
-            label="Ω-Gate Ativo"
-            description="Filtro de segurança para todas as execuções"
+            label="Ω-Gate (preferência visual)"
+            description="Sem conexão verificada com a autorização canônica"
             toggle
             toggleValue={omegaGateEnabled}
             onToggle={setOmegaGateEnabled}
@@ -134,8 +148,8 @@ export default function SettingsScreen() {
           <View style={styles.divider} />
           <SettingRow
             icon="book"
-            label="Ledger Imutável"
-            description="Registro verificável de todas as ações do agente"
+            label="Ledger (interface demonstrativa)"
+            description="Não foi validado como ledger criptográfico externo"
             toggle
             toggleValue={ledgerEnabled}
             onToggle={setLedgerEnabled}
