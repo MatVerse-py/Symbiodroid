@@ -1,97 +1,156 @@
-import { DelegationKernel, LocalSandbox } from "../src/delegation";
-import type { AuthorityPort, CapabilityLease, LeaseRequest, ActionRequest } from "../src/delegation";
-
-const ensure = (condition: unknown, message: string) => { if (!condition) throw new Error(message); };
-const expectThrow = async (f: () => Promise<unknown>, message: string) => {
-  try { await f(); } catch { return; }
-  throw new Error(message);
+import { DelegationKernel, LocalSandbox, canonicalSnapshot } from "../src/delegation";
+import type { AuthorityPort, IdentityBoundary, LeaseRequest, ActionRequest, ExecutionPort } from "../src/delegation";
+const assert = (ok: unknown, why: string): void => { if (!ok) throw Error(why); };
+const reject = async (fn: () => Promise<unknown>, why: string): Promise<void> => {
+  try { await fn(); } catch { return; } throw Error(why);
 };
-const authority: AuthorityPort = {
-  async approveLease(_: Readonly<LeaseRequest>, proof: unknown) { return proof === "LOCAL_HUMAN_APPROVAL"; },
-  async approveRevocation(_: Readonly<CapabilityLease>, proof: unknown) { return proof === "LOCAL_HUMAN_APPROVAL"; },
+let time = 1000;
+const auth: IdentityBoundary = {
+  async authenticateOwner(p) { return p === "owner-secret" ? { principalId: "owner" } : null; },
+  async authenticateAgent(p) {
+    if (p === "agent-secret") return { principalId: "owner", agentId: "agent" };
+    if (p === "other-agent-secret") return { principalId: "owner", agentId: "other" };
+    if (p === "foreign-principal") return { principalId: "foreign", agentId: "agent" };
+    return null;
+  },
 };
-const request = (id: string, ms = 2000, maxUses = 3): LeaseRequest => ({
-  leaseId: id, principalId: "owner", agentId: "agent.research", capability: "local.note.append",
-  scope: "personal.notes", expiresAtMs: ms, maxUses,
+const consent: AuthorityPort = {
+  async approveLease(_r, approval) { return approval === "tap"; },
+  async approveRevocation(_r, approval) { return approval === "tap"; },
+};
+const lease = (id: string, until = 3000, max = 3): LeaseRequest => ({
+  leaseId: id, principalId: "owner", agentId: "agent", scope: "notes", capability: "local.note.append",
+  expiresAtMs: until, maxUses: max,
 });
-const action = (actionId: string, leaseId: string, text = "hello"): ActionRequest => ({
-  actionId, leaseId, agentId: "agent.research", capability: "local.note.append",
-  scope: "personal.notes", payload: { text },
+const action = (id: string, l: string, payload: unknown = { text: "hello" }): ActionRequest => ({
+  actionId: id, leaseId: l, agentId: "agent", scope: "notes", capability: "local.note.append", payload,
 });
+const kernel = new DelegationKernel(new LocalSandbox(), consent, auth, () => time);
+const create = (id: string, until?: number, max?: number) => kernel.issueLease(lease(id, until, max), "owner-secret", "tap");
+const act = (id: string, l: string, payload?: unknown) => kernel.execute(action(id, l, payload), "agent-secret");
 
 async function run(): Promise<void> {
-  let time = 1000;
-  const sandbox = new LocalSandbox();
-  const kernel = new DelegationKernel(sandbox, authority, () => time);
-  const tests: Array<[string, () => Promise<void>]> = [
-    ["default deny", async () => {
-      const denied = new DelegationKernel(new LocalSandbox());
-      await expectThrow(() => denied.issueLease(request("deny", Date.now() + 200), "LOCAL_HUMAN_APPROVAL"), "untrusted consent accepted");
+  const checks: Array<[string, () => Promise<void>]> = [
+    ["fail closed default", async () => {
+      const k = new DelegationKernel(new LocalSandbox());
+      await reject(() => k.issueLease(lease("default", Date.now()+5000), "owner-secret", "tap"), "default granted");
+      assert(k.getLease("default") === undefined, "stored default lease");
+    }],
+    ["owner authentication mandatory", async () => {
+      await reject(() => kernel.issueLease(lease("no-owner"), "wrong", "tap"), "owner bypass");
+    }],
+    ["principal mismatch", async () => {
+      await reject(() => kernel.issueLease({ ...lease("wrong-principal"), principalId: "other" }, "owner-secret", "tap"), "principal mismatch");
     }],
     ["consent mandatory", async () => {
-      await expectThrow(() => kernel.issueLease(request("no-proof"), "not-a-proof"), "missing consent accepted");
+      await reject(() => kernel.issueLease(lease("no-tap"), "owner-secret", "wrong"), "consent bypass");
     }],
-    ["grant and execution", async () => {
-      await kernel.issueLease(request("l1"), "LOCAL_HUMAN_APPROVAL");
-      const first = await kernel.execute(action("a1", "l1"));
-      ensure(first.status === "EXECUTED", "expected execution");
+    ["grant & action", async () => {
+      await create("l1"); assert((await act("a1", "l1")).status === "EXECUTED", "execution failure");
     }],
-    ["idempotent duplicate", async () => {
-      const [a, b] = await Promise.all([kernel.execute(action("same", "l1")), kernel.execute(action("same", "l1"))]);
-      ensure(a.status === "EXECUTED" && a === b, "duplicate executed twice");
-      ensure(kernel.getLease("l1")?.uses === 2, "duplicate spent a second use");
+    ["duplicate coalesced", async () => {
+      const [a,b] = await Promise.all([act("dup", "l1"), act("dup", "l1")]);
+      assert(a.status === "EXECUTED" && b.status === "EXECUTED", "duplicate status");
+      assert(kernel.getLease("l1")?.uses === 2, "double use");
     }],
-    ["id collision rejected", async () => {
-      await expectThrow(() => kernel.execute(action("same", "l1", "different")), "action ID collision accepted");
+    ["unauthorized cache replay blocked", async () => {
+      await reject(() => kernel.execute(action("dup", "l1"), "invalid"), "unauthorized receipt leaked");
+      await reject(() => kernel.execute(action("dup", "l1"), "foreign-principal"), "cross-principal receipt leaked");
     }],
-    ["agent isolation", async () => {
-      const res = await kernel.execute({ ...action("impersonation", "l1"), agentId: "agent.other" });
-      ensure(res.status === "DENIED" && res.reason === "AGENT_MISMATCH", "agent isolation broken");
+    ["action ID conflict", async () => {
+      await reject(() => act("dup", "l1", { text: "different" }), "conflict accepted");
     }],
-    ["scope isolation", async () => {
-      const res = await kernel.execute({ ...action("scope", "l1"), scope: "another.scope" });
-      ensure(res.status === "DENIED" && res.reason === "SCOPE_MISMATCH", "scope isolation broken");
+    ["authenticated agent cannot impersonate", async () => {
+      await reject(() => kernel.execute(action("impersonate", "l1"), "other-agent-secret"), "impersonation accepted");
     }],
-    ["capability isolation", async () => {
-      const res = await kernel.execute({ ...action("pay", "l1"), capability: "wallet.pay" as ActionRequest["capability"] });
-      ensure(res.status === "DENIED", "forbidden capability accepted");
+    ["scope mismatch", async () => {
+      const r = await kernel.execute({ ...action("scope", "l1"), scope: "private" }, "agent-secret");
+      assert(r.status === "DENIED" && r.reason === "SCOPE_MISMATCH", "scope allowed");
     }],
-    ["limit exhausted", async () => {
-      await kernel.execute(action("a3", "l1"));
-      const denied = await kernel.execute(action("a4", "l1"));
-      ensure(denied.reason === "BUDGET_EXHAUSTED", "limit bypassed");
+    ["capability mismatch", async () => {
+      const r = await kernel.execute({ ...action("cap", "l1"), capability: "local.note.read" }, "agent-secret");
+      assert(r.status === "DENIED" && r.reason === "CAPABILITY_MISMATCH", "capability allowed");
+    }],
+    ["budget exhausted", async () => {
+      await act("a3", "l1");
+      assert((await act("a4", "l1")).reason === "BUDGET_EXHAUSTED", "budget bypass");
     }],
     ["expires", async () => {
-      await kernel.issueLease(request("exp", 1200), "LOCAL_HUMAN_APPROVAL");
-      time = 1200;
-      const denied = await kernel.execute(action("expired", "exp"));
-      ensure(denied.reason === "LEASE_EXPIRED", "expired lease used");
-      time = 1000;
+      await create("expire", 1300); time = 1300;
+      assert((await act("expired", "expire")).reason === "LEASE_EXPIRED", "expiry bypass"); time = 1000;
     }],
-    ["revocation requires authority", async () => {
-      await kernel.issueLease(request("rev"), "LOCAL_HUMAN_APPROVAL");
-      await expectThrow(() => kernel.revokeLease("rev", "invalid"), "unapproved revocation");
-      await kernel.revokeLease("rev", "LOCAL_HUMAN_APPROVAL");
-      const denied = await kernel.execute(action("post-revoke", "rev"));
-      ensure(denied.reason === "LEASE_REVOKED", "revoked lease used");
+    ["revocation owner consent", async () => {
+      await create("revoke");
+      await reject(() => kernel.revokeLease("revoke", "wrong", "tap"), "revoked without owner");
+      await reject(() => kernel.revokeLease("revoke", "owner-secret", "wrong"), "revoked without approval");
+      await kernel.revokeLease("revoke", "owner-secret", "tap");
+      assert((await act("after-revoke", "revoke")).reason === "LEASE_REVOKED", "revocation bypass");
     }],
-    ["failure spends use; sensitive payload not audited", async () => {
-      await kernel.issueLease(request("bad", 2000, 1), "LOCAL_HUMAN_APPROVAL");
-      const failure = await kernel.execute(action("failed", "bad", ""));
-      ensure(failure.status === "FAILED", "expected failure");
-      const denied = await kernel.execute(action("retry", "bad"));
-      ensure(denied.reason === "BUDGET_EXHAUSTED", "unbounded retries");
-      ensure(!JSON.stringify(kernel.getAudit()).includes("payload"), "payload in audit");
+    ["expiry limit and duplicate lease", async () => {
+      await reject(() => create("big", time+86_400_001), "oversize lease");
+      await reject(() => create("l1"), "duplicate lease");
     }],
-    ["lease race and invalid horizon", async () => {
-      await expectThrow(() => kernel.issueLease(request("long", 1000 + 86400000 + 1), "LOCAL_HUMAN_APPROVAL"), "unbounded lease");
-      await expectThrow(() => kernel.issueLease(request("rev"), "LOCAL_HUMAN_APPROVAL"), "duplicate lease id");
+    ["canonical payload key order", async () => {
+      assert(canonicalSnapshot({ a: 1, b: 2 }).json === canonicalSnapshot({ b: 2, a: 1 }).json, "unstable canonicalization");
+    }],
+    ["prototype pollution rejected", async () => {
+      const malicious = JSON.parse('{"__proto__":{"role":"admin"}}');
+      await reject(() => act("proto", "l1", malicious), "proto attack accepted");
+    }],
+    ["cyclic payload rejected", async () => {
+      const cycle: { me?: unknown } = {}; cycle.me = cycle;
+      await reject(() => act("cyclic", "l1", cycle), "cycle accepted");
+    }],
+    ["undefined and nonfinite rejected", async () => {
+      await reject(() => act("undefined", "l1", { x: undefined }), "undefined allowed");
+      await reject(() => act("nan", "l1", { x: NaN }), "NaN allowed");
+    }],
+    ["getter not invoked by canonicalizer", async () => {
+      let read = false;
+      const malicious = Object.defineProperty({}, "x", { enumerable: true, get() { read = true; throw Error("GETTER_TRIGGERED"); } });
+      await reject(() => act("getter", "l1", malicious), "getter accepted");
+      assert(!read, "getter was executed");
+    }],
+    ["sparse array and symbols rejected", async () => {
+      await reject(() => act("sparse", "l1", [ , 42]), "sparse array accepted");
+      await reject(() => act("symbols", "l1", { [Symbol("secret")]: 1 }), "symbol silently dropped");
+    }],
+    ["oversize payload rejected", async () => {
+      await reject(() => act("oversize", "l1", { text: "z".repeat(33000) }), "oversize allowed");
+    }],
+    ["mutation after call cannot change request", async () => {
+      await create("mutable");
+      const payload = { text: "original" };
+      const pending = act("mutation", "mutable", payload);
+      payload.text = "tampered";
+      const r = await pending;
+      assert(r.status === "EXECUTED", "mutation execution fail");
+      assert((await act("mutation", "mutable", { text: "original" })).status === "EXECUTED", "snapshot mismatch");
+      await reject(() => act("mutation", "mutable", { text: "tampered" }), "mutated fingerprint accepted");
+    }],
+    ["executor failure exhausts use", async () => {
+      await create("fail", 3000, 1);
+      assert((await act("bad", "fail", { text: "" })).status === "FAILED", "failed result");
+      assert((await act("retry", "fail")).reason === "BUDGET_EXHAUSTED", "retry unlimited");
+    }],
+    ["inflight revocation marked after completion", async () => {
+      let release!: () => void;
+      const wait = new Promise<void>(resolve => { release = resolve; });
+      const ex: ExecutionPort = { async execute() { await wait; return { ok: true }; } };
+      const k = new DelegationKernel(ex, consent, auth, () => time);
+      await k.issueLease(lease("inflight"), "owner-secret", "tap");
+      const pending = k.execute(action("running", "inflight"), "agent-secret");
+      await Promise.resolve(); await Promise.resolve();
+      await k.revokeLease("inflight", "owner-secret", "tap");
+      release(); const r = await pending;
+      assert(r.status === "EXECUTED" && r.reason === "COMPLETED_AFTER_REVOCATION", "inflight result misclassified");
+    }],
+    ["no raw payload stored in audit", async () => {
+      assert(!JSON.stringify(kernel.getAudit()).includes("original"), "payload disclosed in audit");
+      assert(kernel.getAudit().every(e => e.sequence > 0), "audit missing sequence");
     }],
   ];
-  for (const [name, test] of tests) {
-    await test();
-    console.log("PASS", name);
-  }
-  console.log(tests.length + "/" + tests.length + " PASS");
+  for (const [name, test] of checks) { await test(); console.log("PASS", name); }
+  console.log(`${checks.length}/${checks.length} PASS`);
 }
-run().catch((e: unknown) => { console.error("FAIL", e); throw e; });
+run().catch(e => { console.error("FAIL", e); throw e; });
