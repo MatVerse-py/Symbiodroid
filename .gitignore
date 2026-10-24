@@ -80,3 +80,6 @@ app-example
 
 # Symbiodroid offline delegation build
 .delegation-build/
+
+# Generated Android-targeted Metro JS export (not an APK)
+.android-bundle-ci/
