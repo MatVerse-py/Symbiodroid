@@ -44,18 +44,18 @@ export async function readDelegationReadiness(
   return database.transaction(async tx => {
     const lease = await tx.get<LeaseCounts>(
       `SELECT COUNT(*) AS total,
-      SUM(CASE WHEN revoked_ms IS NULL AND expires_ms > ? THEN 1 ELSE 0 END) AS active,
-      SUM(CASE WHEN revoked_ms IS NULL AND expires_ms <= ? THEN 1 ELSE 0 END) AS expired,
-      SUM(CASE WHEN revoked_ms IS NOT NULL THEN 1 ELSE 0 END) AS revoked
+      COALESCE(SUM(CASE WHEN revoked_ms IS NULL AND expires_ms > ? THEN 1 ELSE 0 END),0) AS active,
+      COALESCE(SUM(CASE WHEN revoked_ms IS NULL AND expires_ms <= ? THEN 1 ELSE 0 END),0) AS expired,
+      COALESCE(SUM(CASE WHEN revoked_ms IS NOT NULL THEN 1 ELSE 0 END),0) AS revoked
       FROM delegation_leases`,
       timestamp, timestamp,
     );
     const action = await tx.get<ActionCounts>(
       `SELECT COUNT(*) AS total,
-      SUM(CASE WHEN status='UNKNOWN' THEN 1 ELSE 0 END) AS unknown,
-      SUM(CASE WHEN status='EXECUTED' THEN 1 ELSE 0 END) AS executed,
-      SUM(CASE WHEN status='FAILED' THEN 1 ELSE 0 END) AS failed,
-      SUM(CASE WHEN dispatch_started_ms IS NOT NULL THEN 1 ELSE 0 END) AS claimed
+      COALESCE(SUM(CASE WHEN status='UNKNOWN' THEN 1 ELSE 0 END),0) AS unknown,
+      COALESCE(SUM(CASE WHEN status='EXECUTED' THEN 1 ELSE 0 END),0) AS executed,
+      COALESCE(SUM(CASE WHEN status='FAILED' THEN 1 ELSE 0 END),0) AS failed,
+      COALESCE(SUM(CASE WHEN dispatch_started_ms IS NOT NULL THEN 1 ELSE 0 END),0) AS claimed
       FROM delegation_actions`,
     );
     return {
