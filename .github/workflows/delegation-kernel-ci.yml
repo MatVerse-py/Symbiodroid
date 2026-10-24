@@ -1,0 +1,27 @@
+name: Delegation Kernel local contracts
+on:
+  pull_request:
+    paths:
+      - 'src/delegation/**'
+      - 'tests/delegation.test.ts'
+      - 'examples/delegation-demo.ts'
+      - 'tsconfig.delegation.json'
+      - '.github/workflows/delegation-kernel-ci.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  contract-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Compile the standalone contract suite
+        run: npx --yes --package typescript@5.8.3 tsc -p tsconfig.delegation.json
+      - name: Run 13 local boundary tests
+        run: node .delegation-build/tests/delegation.test.js
+      - name: Run local demonstration
+        run: node .delegation-build/examples/delegation-demo.js
