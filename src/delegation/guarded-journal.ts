@@ -3,7 +3,7 @@ import type { ActionRequest, AuthorityPort, CapabilityLease, IdentityBoundary, L
 import { DenyAllAuthority, DenyAllIdentity } from './contracts';
 import { canonicalSnapshot } from './canonical';
 import { DurableDelegationJournal } from './durable-journal';
-import type { ReserveResult } from './durable-journal';
+import type { ReserveResult, DispatchClaim } from './durable-journal';
 
 export interface OmegaDecisionPort {
   allow(action: Readonly<ActionRequest>, authenticated: Readonly<{principalId:string;agentId:string}>): Promise<boolean>;
@@ -47,18 +47,32 @@ export class GuardedDelegationJournal {
     if(!(await this.consent.approveRevocation(lease,consentProof))) throw Error('REVOCATION_NOT_AUTHORIZED');
     await this.journal.revokeForOwner(leaseId,owner.principalId);
   }
-  async reserve(req:ActionRequest,agentProof:unknown):Promise<ReserveResult>{
-    if(!this.fingerprint) throw Error('FINGERPRINT_PORT_REQUIRED');
-    const stable=canonicalSnapshot(req).value as ActionRequest;
-    if(!valid(stable.agentId)||!valid(stable.leaseId)||!valid(stable.actionId)) throw Error('INVALID_ACTION');
-    const actor=await this.identity.authenticateAgent(agentProof);
-    if(!actor||!valid(actor.principalId)||!valid(actor.agentId)||actor.agentId!==stable.agentId) throw Error('AGENT_AUTH_FAILED');
-    if(!(await this.omega.allow(stable,actor))) throw Error('OMEGA_DENIED');
-    const canonical=canonicalSnapshot([
+  /** Authenticate agent and obtain a fresh, independently evaluated Omega policy decision. */
+  private async authenticateAndDigest(req: ActionRequest, agentProof: unknown): Promise<{
+    stable: ActionRequest; actor: { principalId: string; agentId: string }; digest: string
+  }> {
+    if (!this.fingerprint) throw Error('FINGERPRINT_PORT_REQUIRED');
+    const stable = canonicalSnapshot(req).value as ActionRequest;
+    if (!valid(stable.agentId) || !valid(stable.leaseId) || !valid(stable.actionId)) throw Error('INVALID_ACTION');
+    const actor = await this.identity.authenticateAgent(agentProof);
+    if (!actor || !valid(actor.principalId) || !valid(actor.agentId) || actor.agentId !== stable.agentId)
+      throw Error('AGENT_AUTH_FAILED');
+    if (!(await this.omega.allow(stable,actor))) throw Error('OMEGA_DENIED');
+    const canonical = canonicalSnapshot([
       stable.actionId,stable.leaseId,stable.agentId,stable.capability,
       stable.scope,canonicalSnapshot(stable.payload).json
     ]);
-    const digest=await this.fingerprint.sha256(canonical.json);
+    const digest = await this.fingerprint.sha256(canonical.json);
+    if (!/^[a-f0-9]{64}$/.test(digest)) throw Error('INVALID_FINGERPRINT');
+    return {stable,actor,digest};
+  }
+  /** Recheck identity and policy at last local pre-execution gate. */
+  async claimForDispatch(req: ActionRequest, agentProof: unknown): Promise<DispatchClaim> {
+    const {stable,actor,digest} = await this.authenticateAndDigest(req,agentProof);
+    return this.journal.claimForDispatch(stable.actionId,actor.principalId,actor.agentId,digest);
+  }
+  async reserve(req: ActionRequest, agentProof: unknown): Promise<ReserveResult> {
+    const {stable,actor,digest} = await this.authenticateAndDigest(req,agentProof);
     return this.journal.reserve(stable,actor.principalId,digest);
   }
   async reconcile(actionId:string,fingerprint:string,outcome:'EXECUTED'|'FAILED',proof:unknown):Promise<void>{
