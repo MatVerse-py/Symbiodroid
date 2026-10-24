@@ -8,6 +8,7 @@ on:
       - 'examples/delegation-demo.ts'
       - 'tsconfig.delegation.json'
       - 'docs/DELEGATION_P0_RECOVERY_V0_3.md'
+      - 'docs/DELEGATION_DISPATCH_CLAIM_V0_4.md'
       - 'docs/DELEGATION_KERNEL_V0_1.md'
       - '.github/workflows/delegation-kernel-ci.yml'
   workflow_dispatch:
@@ -30,5 +31,7 @@ jobs:
         run: node tests/durable-sqlite.test.cjs
       - name: Run identity, policy and evidence boundary tests
         run: node tests/guarded-journal.test.cjs
+      - name: Run 17 dispatch-claim race and revocation tests
+        run: node tests/dispatch-claim.test.cjs
       - name: Run isolated local demonstration
         run: node .delegation-build/examples/delegation-demo.js
