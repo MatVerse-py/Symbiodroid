@@ -1,0 +1,101 @@
+name: Android native debug APK (experimental)
+on:
+  pull_request:
+    paths:
+      - 'app.json'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'app/**'
+      - 'src/delegation/**'
+      - 'scripts/audit-pnpm-lock.cjs'
+      - '.github/workflows/android-debug-apk.yml'
+      - 'docs/ANDROID_DEBUG_APK_V0_8.md'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  debug-apk:
+    # Never execute fork-authored code or use a release credential.
+    # This job runs only against the dedicated same-repository review branch.
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository && github.head_ref == 'feat/android-debug-apk-ci-v0-8'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    env:
+      CI: '1'
+      EXPO_NO_TELEMETRY: '1'
+      NODE_OPTIONS: '--max-old-space-size=4096'
+    steps:
+      - name: Checkout isolated review branch
+        uses: actions/checkout@v4
+        with:
+          ref: feat/android-debug-apk-ci-v0-8
+          persist-credentials: false
+      - name: Set up Java 17 for Expo SDK 53 Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Set up pnpm 9 for lockfile v9
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9.15.9
+          run_install: false
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: pnpm
+      - name: Verify full frozen dependency graph
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/audit-pnpm-lock.cjs
+          pnpm install --frozen-lockfile --ignore-scripts --config.node-linker=hoisted
+      - name: Prepare CI-only Android package identifier
+        shell: bash
+        run: |
+          set -euo pipefail
+          node - <<'NODE'
+          const fs=require('node:fs');
+          const file='app.json';
+          const app=JSON.parse(fs.readFileSync(file,'utf8'));
+          app.expo.android??={};
+          if (app.expo.android.package && app.expo.android.package!=='com.matverse.symbiodroid.dev') {
+            throw Error('ANDROID_PACKAGE_ID_CONFLICT: explicitly review canonical package before build');
+          }
+          app.expo.android.package='com.matverse.symbiodroid.dev';
+          fs.writeFileSync(file,JSON.stringify(app,null,2)+'\n');
+          console.log('Using CI-only unregistered DEBUG package ID; app.json not committed.');
+          NODE
+      - name: Generate native Android project with Expo prebuild
+        run: pnpm exec expo prebuild --platform android --no-install --clean --non-interactive
+      - name: Build unsigned-release-independent debug APK
+        working-directory: android
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew --no-daemon --stacktrace assembleDebug
+      - name: Verify APK is present and hash its contents
+        id: apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          apk="android/app/build/outputs/apk/debug/app-debug.apk"
+          test -s "$apk"
+          sha256sum "$apk" | tee android-debug-apk.sha256
+          du -h "$apk"
+          echo "This is a development/debug APK, not a release-signed production build."
+      - name: Upload short-lived debug artifact for owned-device smoke test
+        uses: actions/upload-artifact@v4
+        with:
+          name: symbiodroid-debug-apk-v0-8
+          path: |
+            android/app/build/outputs/apk/debug/app-debug.apk
+            android-debug-apk.sha256
+          if-no-files-found: error
+          retention-days: 1
+      - name: Publish build limitations
+        shell: bash
+        run: |
+          echo 'DEBUG_APK_BUILD=PASS. No device install, Android biometric runtime, Ω integration or WORLD_REAL_PASS has been tested.'
