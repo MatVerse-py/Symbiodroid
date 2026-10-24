@@ -3,7 +3,7 @@
  * This screen CANNOT issue leases, authenticate principals, authorize actions,
  * dispatch effects, or assert WORLD_REAL_PASS.
  */
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import { ActivityIndicator, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useRouter } from 'expo-router';
 import * as SQLite from 'expo-sqlite';
@@ -38,11 +38,16 @@ export default function DelegationAuditScreen() {
   const [cryptoCheck, setCryptoCheck] = useState<NativeCheck>('NÃO TESTADO');
   const [presenceCheck, setPresenceCheck] = useState<NativeCheck>('NÃO TESTADO');
   const [running, setRunning] = useState(false);
+  const [databaseOpened, setDatabaseOpened] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // There must be no on-mount invocation of this function. openDatabaseAsync
+  // may create a persistent, currently unencrypted database file.
+  // The first invocation is a user-triggered opt-in; not security consent.
   const refresh = useCallback(async () => {
     setRunning(true);
     setError(null);
+    setSnapshot(null);
     if (!isNative) {
       setError('Diagnóstico nativo disponível somente em Android/iOS. Execução web bloqueada.');
       setRunning(false);
@@ -54,6 +59,7 @@ export default function DelegationAuditScreen() {
       const port = expoSqlitePort(db);
       // Bootstrap creates only the local schema; no lease or operation is created.
       await new DurableDelegationJournal(port).initialize();
+      setDatabaseOpened(true);
       const result = await readDelegationReadiness(port);
       setSnapshot(result);
       const actual = await Crypto.digestStringAsync(Crypto.CryptoDigestAlgorithm.SHA256, KAT_INPUT);
@@ -68,7 +74,7 @@ export default function DelegationAuditScreen() {
     }
   }, []);
 
-  useEffect(() => { void refresh(); }, [refresh]);
+  // Deliberately no automatic DB open, schema write, biometric prompt or network call.
 
   const checkLocalPresence = useCallback(async () => {
     // A successful platform prompt is evidence of local presence only.
@@ -98,7 +104,8 @@ export default function DelegationAuditScreen() {
         <Text style={styles.kicker}>URANO / SYMBIODROID / INSTRUMENTAÇÃO</Text>
         <Text style={styles.heading}>Delegação: diagnóstico local</Text>
         <Text style={styles.intro}>
-          Observação de armazenamento, criptografia e presença local. Não concede autoridade,
+          Verificação iniciada somente por comando explícito. A primeira execução cria
+          um banco SQLite local cuja criptografia em repouso NÃO foi verificada. Não concede autoridade,
           não conecta o Ω-Gate e não executa ações no dispositivo.
         </Text>
         <View style={styles.warning}>
@@ -109,6 +116,11 @@ export default function DelegationAuditScreen() {
           </Text>
         </View>
         <Text style={styles.section}>Armazenamento SQLite</Text>
+        {!databaseOpened ? (
+          <Text style={styles.body}>
+            NÃO INICIADO. Nenhum banco é aberto ou criado automaticamente ao visitar esta tela.
+          </Text>
+        ) : null}
         {running ? <ActivityIndicator color="#86e4bc" /> : null}
         {error ? <Text style={styles.error}>{error}</Text> : null}
         {snapshot ? (
@@ -136,14 +148,19 @@ export default function DelegationAuditScreen() {
           <Text style={styles.body}>WORLD_REAL_PASS: HOLD</Text>
         </View>
         <Pressable style={styles.button} onPress={() => void refresh()} disabled={running} accessibilityRole="button">
-          <Text style={styles.buttonText}>Atualizar diagnóstico local</Text>
+          <Text style={styles.buttonText}>{databaseOpened
+            ? 'Atualizar diagnóstico local'
+            : 'Iniciar diagnóstico (cria banco SQLite local não criptografado)'}
+          </Text>
         </Pressable>
         <Pressable style={styles.secondaryButton} onPress={() => void checkLocalPresence()} disabled={running} accessibilityRole="button">
           <Text style={styles.secondaryText}>Testar presença biométrica (opcional)</Text>
         </Pressable>
         <Text style={styles.footnote}>
-          O primeiro acesso inicializa um esquema SQLite separado, sem inserir ações nem
-          autorizações. Nenhum payload, identificador de agente ou segredo é exibido nesta tela.
+          Somente ao acionar o diagnóstico um esquema SQLite separado será criado ou
+          aberto. O arquivo não contém dados de identidade novos desta tela, mas
+          a criptografia em repouso NÃO foi verificada. Nenhum payload, identificador
+          de agente ou segredo é exibido.
         </Text>
       </ScrollView>
     </View>
