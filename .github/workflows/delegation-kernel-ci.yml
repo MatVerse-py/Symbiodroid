@@ -12,6 +12,7 @@ on:
       - 'docs/DELEGATION_P0_RECOVERY_V0_3.md'
       - 'docs/DELEGATION_DISPATCH_CLAIM_V0_4.md'
       - 'docs/DELEGATION_NATIVE_READINESS_V0_5.md'
+      - 'docs/DELEGATION_EXPLICIT_BOOTSTRAP_V0_6.md'
       - 'docs/DELEGATION_KERNEL_V0_1.md'
       - '.github/workflows/delegation-kernel-ci.yml'
   workflow_dispatch:
@@ -38,6 +39,8 @@ jobs:
         run: node tests/dispatch-claim.test.cjs
       - name: Verify read-only readiness and privacy projection
         run: node tests/readiness.test.cjs
+      - name: Test Expo SQLite port and explicit native bootstrap
+        run: node tests/expo-sqlite-port.test.cjs
       - name: Parse native Expo screen without bundling dependencies
         run: npx --yes --package esbuild@0.25.12 esbuild app/delegation-audit.tsx --outfile=/tmp/matverse-delegation-audit.js --format=esm
       - name: Parse Expo settings deep link
