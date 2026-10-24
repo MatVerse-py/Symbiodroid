@@ -4,8 +4,10 @@ on:
     paths:
       - 'src/delegation/**'
       - 'tests/delegation.test.ts'
+      - 'tests/*.test.cjs'
       - 'examples/delegation-demo.ts'
       - 'tsconfig.delegation.json'
+      - 'docs/DELEGATION_P0_RECOVERY_V0_3.md'
       - 'docs/DELEGATION_KERNEL_V0_1.md'
       - '.github/workflows/delegation-kernel-ci.yml'
   workflow_dispatch:
@@ -24,5 +26,9 @@ jobs:
         run: npx --yes --package typescript@5.8.3 tsc -p tsconfig.delegation.json
       - name: Run 26 adversarial local boundary tests
         run: node .delegation-build/tests/delegation.test.js
+      - name: Run SQLite crash recovery and atomic budget tests
+        run: node tests/durable-sqlite.test.cjs
+      - name: Run identity, policy and evidence boundary tests
+        run: node tests/guarded-journal.test.cjs
       - name: Run isolated local demonstration
         run: node .delegation-build/examples/delegation-demo.js
