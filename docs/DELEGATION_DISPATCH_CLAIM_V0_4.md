@@ -23,6 +23,6 @@ Hardens the local delegation journal from PR #6; stacked on `feat/delegation-p0-
 ## Validation
 Run `tsc -p tsconfig.delegation.json` followed by `node .delegation-build/tests/delegation.test.js`, `node tests/durable-sqlite.test.cjs`, `node tests/guarded-journal.test.cjs`, `node tests/dispatch-claim.test.cjs`, and the local demo.
 
-Expected reference suite: 26+17+15+17 = **75** unit/regression tests. Node 22 `node:sqlite` is an experimental **test-only** adapter; production Expo SQLite runtime remains unverified.
+Expected reference suite: 26+17+15+18 = **76** unit/regression tests. Node 22 `node:sqlite` is an experimental **test-only** adapter; production Expo SQLite runtime remains unverified.
 
 **Status:** LOCAL_REFERENCE_PASS; real identity/Ω/Android/world-real execution HOLD.
