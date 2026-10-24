@@ -15,6 +15,10 @@ export interface SqlPort {
   transaction<T>(body: (tx: SqlTx) => Promise<T>): Promise<T>;
 }
 export type JournalState = 'UNKNOWN' | 'EXECUTED' | 'FAILED';
+/** Obtained once after an independent policy recheck; cannot be replayed. */
+export type DispatchClaim =
+  | { verdict: 'CLAIMED'; actionId: string }
+  | { verdict: 'HOLD' | 'DENIED'; actionId: string; reason: string };
 export type ReserveResult =
   | { verdict: 'RESERVED'; actionId: string; status: 'UNKNOWN' }
   | { verdict: 'HOLD'; reason: string; actionId: string; status?: JournalState }
@@ -26,7 +30,7 @@ interface LeaseRow {
 }
 interface ActionRow {
   action_id: string; lease_id: string; principal_id: string; agent_id: string;
-  fingerprint: string; status: JournalState;
+  fingerprint: string; status: JournalState; dispatch_started_ms: number | null;
 }
 const ID = /^[A-Za-z0-9_.:/-]{1,128}$/;
 const validId = (x: unknown): x is string => typeof x === 'string' && ID.test(x);
@@ -45,9 +49,19 @@ export class DurableDelegationJournal {
       lease_id TEXT NOT NULL REFERENCES delegation_leases(lease_id),
       principal_id TEXT NOT NULL, agent_id TEXT NOT NULL, fingerprint TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'UNKNOWN' CHECK(status IN ('UNKNOWN','EXECUTED','FAILED')),
-      reserved_ms INTEGER NOT NULL, completed_ms INTEGER
+      reserved_ms INTEGER NOT NULL, completed_ms INTEGER, dispatch_started_ms INTEGER
     );
     CREATE INDEX IF NOT EXISTS idx_delegation_action_lease ON delegation_actions(lease_id);`);
+    // Backward-compatible v0.3 migration; never erase previously uncertain outcomes.
+    await this.db.transaction(async tx => {
+      const col = await tx.get<{ n: number }>(
+        "SELECT COUNT(*) AS n FROM pragma_table_info('delegation_actions') WHERE name='dispatch_started_ms'");
+      if (!col?.n) {
+        await tx.run('ALTER TABLE delegation_actions ADD COLUMN dispatch_started_ms INTEGER');
+        // Legacy UNKNOWN may already have reached an executor. Never permit redispatch.
+        await tx.run('UPDATE delegation_actions SET dispatch_started_ms=reserved_ms WHERE dispatch_started_ms IS NULL');
+      }
+    });
   }
   /** Grant only AFTER authenticating the owner and verifying consent in a trusted component. */
   async grant(lease: Readonly<CapabilityLease>): Promise<void> {
@@ -125,6 +139,35 @@ export class DurableDelegationJournal {
       return {verdict:'RESERVED',actionId:action.actionId,status:'UNKNOWN'};
     });
   }
+  /**
+   * Atomic single-use dispatch claim. This is an internal privileged API, not an agent tool.
+   * Crash after a claim produces HOLD, never a second dispatch.
+   */
+  async claimForDispatch(actionId: string, principalId: string, agentId: string, fingerprint: string): Promise<DispatchClaim> {
+    if (![actionId, principalId, agentId].every(validId) || !/^[a-f0-9]{64}$/.test(fingerprint))
+      throw Error('INVALID_DISPATCH_CLAIM');
+    return this.db.transaction(async tx => {
+      const a = await tx.get<ActionRow>(
+        'SELECT action_id,lease_id,principal_id,agent_id,fingerprint,status,dispatch_started_ms FROM delegation_actions WHERE action_id=?',actionId);
+      const denied = (reason: string): DispatchClaim => ({ verdict:'DENIED', actionId, reason });
+      const hold = (reason: string): DispatchClaim => ({ verdict:'HOLD', actionId, reason });
+      if (!a) return denied('ACTION_NOT_RESERVED');
+      if (a.principal_id !== principalId || a.agent_id !== agentId) return denied('IDENTITY_MISMATCH');
+      if (a.fingerprint !== fingerprint) throw Error('ACTION_ID_CONFLICT');
+      if (a.status !== 'UNKNOWN') return hold('OUTCOME_ALREADY_KNOWN');
+      if (a.dispatch_started_ms !== null) return hold('DISPATCH_ALREADY_CLAIMED');
+      const l = await tx.get<LeaseRow>('SELECT * FROM delegation_leases WHERE lease_id=?',a.lease_id);
+      if (!l || l.principal_id !== principalId || l.agent_id !== agentId) return denied('LEASE_MISMATCH');
+      if (l.revoked_ms !== null) return denied('LEASE_REVOKED');
+      if (this.nowMs() >= l.expires_ms) return denied('LEASE_EXPIRED');
+      const r = await tx.run(
+        `UPDATE delegation_actions SET dispatch_started_ms=? WHERE action_id=? AND status='UNKNOWN' AND dispatch_started_ms IS NULL`,
+        this.nowMs(),actionId);
+      if (r.changes !== 1) return hold('DISPATCH_CLAIM_CONFLICT');
+      return { verdict:'CLAIMED', actionId };
+    });
+  }
+
   /** Only trusted EvidenceOS / executor reconciliation may promote UNKNOWN. */
   async reconcile(actionId: string, fingerprint: string, outcome: 'EXECUTED' | 'FAILED'): Promise<void> {
     if (!validId(actionId) || !/^[a-f0-9]{64}$/.test(fingerprint) ||
